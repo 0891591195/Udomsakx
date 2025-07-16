@@ -1,0 +1,2471 @@
+/**
+ * @file Code.gs for CRMSYB Web Application
+ * @description This script handles serving the HTML, processing form submissions,
+ * saving/recovering data to/from Google Sheets, and managing user authentication/authorization
+ * across multiple customer data sheets and specific status tabs.
+ */
+
+// --- GLOBAL CONFIGURATION & CONSTANTS ---
+// Define configurations for all Google Sheet FILES used in the application.
+const SPREADSHEET_CONFIGS = [
+    { id: '1GKihQhjfR49Sn5CLTtGnXyY2q_I5JfcKjjiiYS1u1xE', name: 'CRMSYB หลัก' },
+    { id: '18trRfG5PNX297RRj3FxMa9Qb93aAvudt0afrdoLQ_Wo', name: 'CRMSYB เขตอยุธยา ปทุมธานี สระบุรี' },
+    { id: '1OGCOmijMU7IdMNLqAY5h3Urv0nfAJFywV1oAcAyVKzk', name: 'CRMSYB เขตสมุทรปราการ ฉะเชิงเทรา ชลบุรี' }, // <--- ID ที่ถูกต้อง
+    { id: '1XQgJjPqnlyr33xLgMM3KA8NOJwgquOl_tTSkGWi4ASQ', name: 'CRMSYB เขต พระราม 2 บางบอน สมุทรสาคร ราชบุรี' }
+];
+
+// Define the names of the specific tabs (sheets) that correspond to customer statuses.
+const CUSTOMER_STATUS_TAB_NAMES = {
+    'ลูกค้า Key': 'ลูกค้า Key',
+    'ลูกค้าเกรด A': 'ลูกค้าเกรด A',
+    'ลูกค้าเกรด B': 'ลูกค้าเกรด B',
+    'ลูกค้าใหม่': 'ลูกค้าใหม่'
+};
+
+const USERS_SHEET_ID = SPREADSHEET_CONFIGS[0].id; // The first spreadsheet in the config will be used for user management
+const USERS_TAB_NAME = 'Users';
+const PRODUCT_LIST_SHEET_ID = SPREADSHEET_CONFIGS[0].id; // Same as USERS_SHEET_ID for simplicity, can be changed
+const PRODUCT_LIST_TAB_NAME = 'ProductList';
+const PRODUCT_LIST_HEADERS = ['ชื่อสินค้า', 'ประเภท'];
+
+// Error Logging & Activity Logging Sheet Configuration (using the same spreadsheet ID)
+const SYSTEM_SHEET_ID = '1ADm_b8v35xrW7DhQ-bpPxld40HJsbFW5XjvtM9xizuY'; // ID ของ Google Sheet 'System' ของคุณ
+const ERROR_LOG_TAB_NAME = 'Error Logs'; // ชื่อชีทสำหรับบันทึก Error Logs
+const ERROR_LOG_HEADERS = ['Timestamp', 'Function Name', 'Error Message', 'Stack Trace', 'User Email']; // Headers for Error Logs sheet
+
+const ACTIVITY_LOG_TAB_NAME = 'Activity Logs'; // ชื่อชีทใหม่สำหรับบันทึกกิจกรรมผู้ใช้
+const ACTIVITY_LOG_HEADERS = ['Timestamp', 'User Email', 'Action Type', 'Details', 'Status']; // Headers for Activity Logs sheet
+
+// Backup Folder ID
+const BACKUP_FOLDER_ID = '1Pjfr0o06bleErp0_UoKZyIAwSGfLey46'; // *** ID ของโฟลเดอร์สำหรับเก็บไฟล์สำรองของคุณ ***
+
+
+const USER_ROLES = {
+    NORMAL_USER: 'user ปกติ',
+    SUPER_USER: 'super user'
+};
+
+// Universal Header Mapping for Customer Data Sheets
+const CUSTOMER_HEADERS_MAPPING = {
+    'ID': 'id',
+    'ชื่อบริษัท': 'companyName',
+    'ที่อยู่': 'address',
+    'ผลิต': 'product',
+    'สินค้าที่ใช้': 'usedProduct',
+    'เว็บไซต์': 'website',
+    'เบอร์โทร (หลัก)': 'primaryPhone',
+    'อีเมล (หลัก)': 'primaryEmail',
+    'ชื่อผู้ติดต่อ 1': 'contact1Name',
+    'ตำแหน่ง 1': 'contact1Position',
+    'เบอร์ติดต่อ 1': 'contact1Phone',
+    'อีเมล 1': 'contact1Email',
+    'ชื่อผู้ติดต่อ 2': 'contact2Name',
+    'ตำแหน่ง 2': 'contact2Position',
+    'เบอร์ติดต่อ 2': 'contact2Phone',
+    'อีเมล 2': 'contact2Email',
+    'ชื่อผู้ติดต่อ 3': 'contact3Name',
+    'ตำแหน่ง 3': 'contact3Position',
+    'เบอร์ติดต่อ 3': 'contact3Phone',
+    'อีเมล 3': 'contact3Email',
+    'สถานะ': 'status',
+    'คอมเม้น': 'comment',
+    'วันที่สร้าง': 'dateCreated',
+    'วันที่แก้ไขล่าสุด': 'lastModified',
+    'จำนวนการติดต่อ': 'contactCount'
+};
+// Array of headers in the desired order for customer sheets
+const CUSTOMER_SHEET_HEADERS = Object.keys(CUSTOMER_HEADERS_MAPPING);
+
+
+// --- CORE FUNCTIONS ---
+
+/**
+ * Serves the HTML file for the web application.
+ * This is the entry point when the web app URL is accessed.
+ */
+function doGet() {
+    try {
+        return HtmlService.createTemplateFromFile('index')
+            .evaluate()
+            .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    } catch (e) {
+        logErrorToSheet("doGet", e);
+        // Fallback or display a simple error page
+        return HtmlService.createHtmlOutput('<h1>เกิดข้อผิดพลาดในการโหลดแอปพลิเคชัน</h1><p>โปรดลองใหม่อีกครั้ง หรือติดต่อผู้ดูแลระบบ</p>');
+    }
+}
+
+/**
+ * Hashes a string using SHA-256 algorithm.
+ * Used primarily for password hashing.
+ * @param {string} text - The input string to hash.
+ * @returns {string} The SHA-256 hash in hexadecimal format.
+ */
+function hashString(text) {
+    try {
+        const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, text);
+        let hex = '';
+        for (let i = 0; i < digest.length; i++) {
+            const byte = digest[i];
+            hex += ((byte < 0 ? 256 + byte : byte)).toString(16).padStart(2, '0');
+        }
+        return hex;
+    } catch (e) {
+        logErrorToSheet("hashString", e);
+        throw e; // Re-throw the error so calling function knows it failed
+    }
+}
+
+/**
+ * Generates a unique ID (UUID).
+ * @returns {string} A new UUID.
+ */
+function generateUniqueId() {
+    try {
+        return Utilities.getUuid();
+    } catch (e) {
+        logErrorToSheet("generateUniqueId", e);
+        throw e;
+    }
+}
+
+/**
+ * Safely gets a sheet by name from a spreadsheet.
+ * Throws an error if the sheet is not found.
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} spreadsheet - The target spreadsheet.
+ * @param {string} sheetName - The name of the sheet to get.
+ * @returns {GoogleAppsScript.Spreadsheet.Sheet} The requested sheet.
+ * @throws {Error} If the sheet is not found.
+ */
+function getSheetByNameOrThrow(spreadsheet, sheetName) {
+    const sheet = spreadsheet.getSheetByName(sheetName);
+    if (!sheet) {
+        throw new Error(`ไม่พบชีทชื่อ "${sheetName}" ใน Spreadsheet "${spreadsheet.getName()}"`);
+    }
+    return sheet;
+}
+
+/**
+ * Retrieves the current logged-in user's role from User Properties.
+ * @returns {string|null} The user's role (e.g., 'user ปกติ', 'super user') or null if not logged in.
+ */
+function getLoggedInUserRole() {
+    return PropertiesService.getUserProperties().getProperty('loggedInRole');
+}
+
+/**
+ * Retrieves the current logged-in username from User Properties.
+ * @returns {string|null} The username or null if not logged in.
+ */
+function getLoggedInUsername() {
+    return PropertiesService.getUserProperties().getProperty('loggedInUser');
+}
+
+/**
+ * Retrieves the list of spreadsheet names allowed for the current logged-in user.
+ * @returns {string[]} An array of allowed spreadsheet names.
+ */
+function getLoggedInUserAllowedSheets() {
+    try {
+        const json = PropertiesService.getUserProperties().getProperty('loggedInAllowedSheets');
+        return json ? JSON.parse(json) : [];
+    } catch (e) {
+        logErrorToSheet("getLoggedInUserAllowedSheets", e);
+        return []; // Return empty array on parse error
+    }
+}
+
+/**
+ * Checks if the current user has access to a specific spreadsheet.
+ * @param {string} targetSpreadsheetName - The name of the spreadsheet to check.
+ * @returns {boolean} True if the user has access, false otherwise.
+ */
+function hasUserSheetAccess(targetSpreadsheetName) {
+    const allowedSheets = getLoggedInUserAllowedSheets();
+    return allowedSheets.includes(targetSpreadsheetName);
+}
+
+// --- ERROR LOGGING FUNCTION ---
+
+/**
+ * บันทึกข้อผิดพลาด (Error) พร้อม Stack Trace ลงใน Google Sheet ที่กำหนด
+ * @param {string} functionName ชื่อฟังก์ชันที่เกิดข้อผิดพลาด
+ * @param {Error} errorObject อ็อบเจกต์ Error ที่มี Stack Trace
+ */
+function logErrorToSheet(functionName, errorObject) {
+    try {
+        const spreadsheet = SpreadsheetApp.openById(SYSTEM_SHEET_ID);
+        let sheet = spreadsheet.getSheetByName(ERROR_LOG_TAB_NAME);
+
+        if (!sheet) {
+            Logger.log(`Sheet '${ERROR_LOG_TAB_NAME}' not found. Attempting to create for error logging.`);
+            sheet = spreadsheet.insertSheet(ERROR_LOG_TAB_NAME);
+            sheet.appendRow(ERROR_LOG_HEADERS); // Add headers to new sheet
+            Logger.log(`Sheet '${ERROR_LOG_TAB_NAME}' created with headers.`);
+        } else {
+             // Ensure headers are correct for the existing sheet
+            const currentHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn() || 1).getValues()[0];
+            if (JSON.stringify(currentHeaders) !== JSON.stringify(ERROR_LOG_HEADERS)) {
+                Logger.log(`Headers in '${ERROR_LOG_TAB_NAME}' do not match. Updating headers for error logging.`);
+                sheet.clearContents(); // Clear content if headers are vastly different
+                sheet.getRange(1, 1, 1, ERROR_LOG_HEADERS.length).setValues([ERROR_LOG_HEADERS]);
+            }
+        }
+
+        const timestamp = new Date();
+        const errorMessage = errorObject.message || 'No error message';
+        const stackTrace = errorObject.stack || 'No stack trace available';
+        const userEmail = Session.getActiveUser().getEmail(); // Get email of user running the script
+
+        // บันทึกข้อมูลลงในแถวใหม่: Timestamp, Function Name, Error Message, Stack Trace, User Email
+        sheet.appendRow([timestamp, functionName, errorMessage, stackTrace, userEmail]);
+
+        Logger.log(`Error logged to sheet: ${functionName} - ${errorMessage}`);
+
+    } catch (e) {
+        // หากเกิดข้อผิดพลาดในการบันทึก Error Log (ซึ่งไม่ควรเกิดขึ้นบ่อยนัก)
+        // บันทึกเฉพาะใน Logger.log เพื่อป้องกัน Infinite loop หรือ Stack overflow
+        Logger.log(`CRITICAL ERROR: Could not log error to sheet for function '${functionName}'. Original error: ${errorObject.message}. Logging error: ${e.message}. Stack: ${e.stack}`);
+    }
+}
+
+// --- ACTIVITY LOGGING FUNCTION (NEW) ---
+
+/**
+ * บันทึกกิจกรรมของผู้ใช้ลงใน Google Sheet ที่กำหนดสำหรับ Activity Logs
+ * @param {string} userEmail อีเมลของผู้ใช้ที่ทำกิจกรรม
+ * @param {string} actionType ประเภทของกิจกรรม (เช่น 'Login', 'Add Customer', 'Update User')
+ * @param {string} details รายละเอียดของกิจกรรม (เช่น ชื่อบริษัท, Username ที่ถูกกระทำ)
+ * @param {'Success'|'Failed'} status สถานะของการกระทำ
+ */
+function logActivityToSheet(userEmail, actionType, details, status) {
+    try {
+        const spreadsheet = SpreadsheetApp.openById(SYSTEM_SHEET_ID);
+        let sheet = spreadsheet.getSheetByName(ACTIVITY_LOG_TAB_NAME);
+
+        if (!sheet) {
+            Logger.log(`Sheet '${ACTIVITY_LOG_TAB_NAME}' not found. Attempting to create for activity logging.`);
+            sheet = spreadsheet.insertSheet(ACTIVITY_LOG_TAB_NAME);
+            sheet.appendRow(ACTIVITY_LOG_HEADERS); // Add headers to new sheet
+            Logger.log(`Sheet '${ACTIVITY_LOG_TAB_NAME}' created with headers.`);
+        } else {
+             // Ensure headers are correct for the existing sheet
+            const currentHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn() || 1).getValues()[0];
+            if (JSON.stringify(currentHeaders) !== JSON.stringify(ACTIVITY_LOG_HEADERS)) {
+                Logger.log(`Headers in '${ACTIVITY_LOG_TAB_NAME}' do not match. Updating headers for activity logging.`);
+                sheet.clearContents(); // Clear content if headers are vastly different
+                sheet.getRange(1, 1, 1, ACTIVITY_LOG_HEADERS.length).setValues([ACTIVITY_LOG_HEADERS]);
+            }
+        }
+
+        const timestamp = new Date();
+        
+        sheet.appendRow([timestamp, userEmail, actionType, details, status]);
+        Logger.log(`Activity logged: ${userEmail} - ${actionType} - ${details} - ${status}`);
+
+    } catch (e) {
+        Logger.log(`CRITICAL ERROR: Could not log activity to sheet for user '${userEmail}'. Action: ${actionType}. Original error: ${e.message}. Stack: ${e.stack}`);
+    }
+}
+
+
+// --- AUTHENTICATION & AUTHORIZATION ---
+
+/**
+ * Handles user login.
+ * @param {string} username - The username provided by the user.
+ * @param {string} password - The password provided by the user (will be hashed).
+ * @returns {Object} Success status, message, user role, and allowed sheets.
+ */
+function doLogin(username, password) {
+    let result = { success: false, message: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' };
+    const userEmailForLog = Session.getActiveUser().getEmail(); // Get active script user email for logging
+
+    try {
+        const spreadsheet = safelyOpenSpreadsheetById(USERS_SHEET_ID, "doLogin - Users Spreadsheet"); // Use helper
+        const usersSheet = getSheetByNameOrThrow(spreadsheet, USERS_TAB_NAME);
+
+        const data = usersSheet.getDataRange().getValues();
+        if (data.length < 2) {
+            result.message = 'ไม่พบข้อมูลผู้ใช้ในระบบ กรุณาติดต่อผู้ดูแล';
+            logActivityToSheet(userEmailForLog, 'Login', `Login attempt for ${username}: ${result.message}`, 'Failed');
+            return result;
+        }
+
+        const headers = data[0];
+        const usernameCol = headers.indexOf('Username');
+        const passwordCol = headers.indexOf('Password');
+        const roleCol = headers.indexOf('Role');
+        const allowedSheetsCol = headers.indexOf('Allowed Sheets');
+
+        if ([usernameCol, passwordCol, roleCol, allowedSheetsCol].some(idx => idx === -1)) {
+            throw new Error('โครงสร้างชีทผู้ใช้ไม่ถูกต้อง กรุณาตรวจสอบหัวข้อคอลัมน์');
+        }
+
+        const hashedPassword = hashString(password);
+
+        for (let i = 0; i < data.length; i++) { // Iterate through all rows including headers to find matching username
+            if (i === 0) continue; // Skip header row
+            const user = data[i];
+            if (user[usernameCol] === username && user[passwordCol] === hashedPassword) {
+                const userRole = user[roleCol];
+                const allowedSheets = (user[allowedSheetsCol] || '').split(',').map(s => s.trim()).filter(s => s);
+
+                // Store user session data in User Properties
+                PropertiesService.getUserProperties().setProperty('loggedInUser', username);
+                PropertiesService.getUserProperties().setProperty('loggedInRole', userRole);
+                PropertiesService.getUserProperties().setProperty('loggedInAllowedSheets', JSON.stringify(allowedSheets));
+
+                Logger.log(`User ${username} logged in successfully with role ${userRole}`);
+                result = { success: true, message: 'เข้าสู่ระบบสำเร็จ!', role: userRole, allowedSheets: allowedSheets };
+                logActivityToSheet(userEmailForLog, 'Login', `User '${username}' logged in successfully`, 'Success');
+                return result;
+            }
+        }
+        logActivityToSheet(userEmailForLog, 'Login', `Failed login attempt for username '${username}'`, 'Failed');
+        return result;
+
+    } catch (error) {
+        logErrorToSheet("doLogin", error);
+        result.message = 'เกิดข้อผิดพลาดในการเข้าสู่ระบบ: ' + error.message;
+        logActivityToSheet(userEmailForLog, 'Login', `Error during login for '${username}': ${error.message}`, 'Failed');
+        return result;
+    }
+}
+
+/**
+ * Logs out the current user by clearing User Properties.
+ * @returns {Object} Success status and message.
+ */
+function doLogout() {
+    const userEmailForLog = Session.getActiveUser().getEmail();
+    const usernameForLog = getLoggedInUsername() || 'Unknown User';
+    try {
+        PropertiesService.getUserProperties().deleteAllProperties();
+        Logger.log('User logged out successfully.');
+        logActivityToSheet(userEmailForLog, 'Logout', `User '${usernameForLog}' logged out`, 'Success');
+        return { success: true, message: 'ออกจากระบบสำเร็จ!' };
+    } catch (error) {
+        logErrorToSheet("doLogout", error);
+        logActivityToSheet(userEmailForLog, 'Logout', `Error during logout for '${usernameForLog}': ${error.message}`, 'Failed');
+        return { success: false, message: 'เกิดข้อผิดพลาดในการออกจากระบบ: ' + error.message };
+    }
+}
+
+// --- INITIAL SETUP AND MIGRATION ---
+
+/**
+ * Safely opens a spreadsheet by ID. Logs and throws an error if unsuccessful.
+ * @param {string} spreadsheetId - The ID of the spreadsheet to open.
+ * @param {string} functionContext - Context for logging (e.g., "setupSheets - Customer Sheets").
+ * @returns {GoogleAppsScript.Spreadsheet.Spreadsheet} The opened spreadsheet.
+ * @throws {Error} If the spreadsheet cannot be opened.
+ */
+function safelyOpenSpreadsheetById(spreadsheetId, functionContext) {
+    try {
+        const spreadsheet = SpreadsheetApp.openById(spreadsheetId);
+        if (!spreadsheet) { // Should not be null if openById doesn't throw, but good defensive check
+            throw new Error(`Spreadsheet with ID "${spreadsheetId}" returned null. (Context: ${functionContext})`);
+        }
+        return spreadsheet;
+    } catch (e) {
+        const errorMessage = `Failed to open spreadsheet ID "${spreadsheetId}" in context "${functionContext}": ${e.message}`;
+        logErrorToSheet(functionContext, new Error(errorMessage + "\n" + e.stack)); // Log with more detail
+        throw new Error(errorMessage); // Re-throw to propagate error
+    }
+}
+
+
+/**
+ * Sets up the required sheets and initial data if they don't exist.
+ * This function should be run once manually or on first deployment.
+ * It creates customer status tabs, user sheet, product list sheet, and error log sheet.
+ */
+function setupSheets() {
+    Logger.log('Starting setupSheets...');
+    
+    // 1. Setup Customer Data Sheets and Tabs
+    SPREADSHEET_CONFIGS.forEach(config => {
+        try {
+            const spreadsheet = safelyOpenSpreadsheetById(config.id, `setupSheets - Customer Sheets (${config.name})`); // Use helper
+            Logger.log(`Setting up customer sheets for: ${spreadsheet.getName()}`);
+            Object.values(CUSTOMER_STATUS_TAB_NAMES).forEach(sheetName => {
+                try {
+                    let sheet = spreadsheet.getSheetByName(sheetName);
+                    if (!sheet) {
+                        sheet = spreadsheet.insertSheet(sheetName);
+                        Logger.log(`Created sheet: ${sheetName}`);
+                    }
+                    // Ensure headers are correct
+                    const currentHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn() || 1).getValues()[0];
+                    if (JSON.stringify(currentHeaders) !== JSON.stringify(CUSTOMER_SHEET_HEADERS)) {
+                        sheet.clearContents(); // Clear content if headers are vastly different
+                        sheet.getRange(1, 1, 1, CUSTOMER_SHEET_HEADERS.length).setValues([CUSTOMER_SHEET_HEADERS]);
+                        Logger.log(`Updated headers for sheet: ${sheetName}`);
+                    }
+                } catch (e) {
+                    logErrorToSheet(`setupSheets - Customer Sheet (${config.name}/${sheetName})`, e); // More specific log
+                    Logger.log(`Error setting up customer sheet "${sheetName}" in "${config.name}": ${e.toString()}`);
+                }
+            });
+        } catch (e) {
+            // Error from safelyOpenSpreadsheetById is already logged, just continue
+            Logger.log(`Skipping customer sheets setup for ${config.name} due to prior error.`);
+        }
+    });
+
+    // 2. Setup Product List Sheet
+    try {
+        const productListSpreadsheet = safelyOpenSpreadsheetById(PRODUCT_LIST_SHEET_ID, "setupSheets - Product List"); // Use helper
+        let productListSheet = productListSpreadsheet.getSheetByName(PRODUCT_LIST_TAB_NAME);
+
+        if (!productListSheet) {
+            Logger.log(`Product List Sheet: Tab "${PRODUCT_LIST_TAB_NAME}" not found. Creating and populating default data.`);
+            productListSheet = productListSpreadsheet.insertSheet(PRODUCT_LIST_TAB_NAME);
+            productListSheet.appendRow(PRODUCT_LIST_HEADERS);
+            productListSheet.appendRow(['SV-105 FP', 'สินค้า']);
+            productListSheet.appendRow(['CT4-200', 'สินค้า']);
+            productListSheet.appendRow(['บริการติดตั้ง', 'บริการ']);
+            productListSheet.appendRow(['บริการบำรุงรักษา', 'บริการ']);
+            Logger.log(`Product List Sheet: Tab "${PRODUCT_LIST_TAB_NAME}" created with default data.`);
+        } else {
+            const currentProductHeaders = productListSheet.getRange(1, 1, 1, productListSheet.getLastColumn() || 1).getValues()[0];
+            if (JSON.stringify(currentProductHeaders) !== JSON.stringify(PRODUCT_LIST_HEADERS)) {
+                Logger.log(`Product List Sheet: Headers in "${PRODUCT_LIST_TAB_NAME}" do not match. Updating headers.`);
+                productListSheet.getRange(1, 1, 1, PRODUCT_LIST_HEADERS.length).setValues([PRODUCT_LIST_HEADERS]);
+            }
+        }
+        Logger.log('Product List Sheet setup completed.');
+    } catch (e) {
+        // Error from safelyOpenSpreadsheetById is already logged, just continue
+        Logger.log('Skipping Product List Sheet setup due to prior error.');
+    }
+
+    // 3. Setup Users Sheet
+    try {
+        const mainSpreadsheet = safelyOpenSpreadsheetById(USERS_SHEET_ID, "setupSheets - Users Sheet"); // Use helper
+        let usersSheet = mainSpreadsheet.getSheetByName(USERS_TAB_NAME);
+        if (!usersSheet) {
+            Logger.log(`Users Sheet: Tab "${USERS_TAB_NAME}" not found. Creating and populating default user.`);
+            usersSheet = mainSpreadsheet.insertSheet(USERS_TAB_NAME);
+            const userHeaders = ['Username', 'Password', 'Role', 'Allowed Sheets'];
+            usersSheet.appendRow(userHeaders);
+            usersSheet.appendRow(['admin', hashString('adminpass'), USER_ROLES.SUPER_USER, SPREADSHEET_CONFIGS.map(s => s.name).join(',')]);
+            usersSheet.appendRow(['user', hashString('userpass'), USER_ROLES.NORMAL_USER, SPREADSHEET_CONFIGS[0].name]);
+            Logger.log(`Users Sheet: Tab "${USERS_TAB_NAME}" created with default users.`);
+        } else {
+            const currentUserHeaders = usersSheet.getRange(1, 1, 1, usersSheet.getLastColumn() || 1).getValues()[0];
+            const expectedUserHeaders = ['Username', 'Password', 'Role', 'Allowed Sheets'];
+            if (JSON.stringify(currentUserHeaders) !== JSON.stringify(expectedUserHeaders)) {
+                 Logger.log(`Users Sheet: Headers in "${USERS_TAB_NAME}" do not match. Updating headers.`);
+                 usersSheet.clearContents(); // Clear content if headers are vastly different
+                 usersSheet.getRange(1, 1, 1, expectedUserHeaders.length).setValues([expectedUserHeaders]);
+                 // Re-add default users if sheet was cleared
+                 usersSheet.appendRow(['admin', hashString('adminpass'), USER_ROLES.SUPER_USER, SPREADSHEET_CONFIGS.map(s => s.name).join(',')]);
+                 usersSheet.appendRow(['user', hashString('userpass'), USER_ROLES.NORMAL_USER, SPREADSHEET_CONFIGS[0].name]);
+            }
+        }
+        Logger.log('Users Sheet setup completed.');
+    } catch (e) {
+        // Error from safelyOpenSpreadsheetById is already logged, just continue
+        Logger.log('Skipping Users Sheet setup due to prior error.');
+    }
+
+    // 4. Setup Error Log Sheet
+    try {
+        const systemSpreadsheet = safelyOpenSpreadsheetById(SYSTEM_SHEET_ID, "setupSheets - System Spreadsheet for Error Log"); // Use helper
+        let errorLogSheet = systemSpreadsheet.getSheetByName(ERROR_LOG_TAB_NAME);
+
+        if (!errorLogSheet) {
+            Logger.log(`Error Log Sheet: Tab "${ERROR_LOG_TAB_NAME}" not found. Creating.`);
+            errorLogSheet = systemSpreadsheet.insertSheet(ERROR_LOG_TAB_NAME);
+            errorLogSheet.appendRow(ERROR_LOG_HEADERS); // Add headers to new sheet
+            Logger.log(`Sheet '${ERROR_LOG_TAB_NAME}' created with headers.`);
+        } else {
+            // If sheet exists, ensure headers are correct
+            const currentErrorLogHeaders = errorLogSheet.getRange(1, 1, 1, errorLogSheet.getLastColumn() || 1).getValues()[0];
+            if (JSON.stringify(currentErrorLogHeaders) !== JSON.stringify(ERROR_LOG_HEADERS)) {
+                Logger.log(`Error Log Sheet: Headers in "${ERROR_LOG_TAB_NAME}" do not match. Updating headers.`);
+                errorLogSheet.clearContents(); // Clear content if headers are vastly different
+                errorLogSheet.getRange(1, 1, 1, ERROR_LOG_HEADERS.length).setValues([ERROR_LOG_HEADERS]);
+            }
+        }
+        Logger.log('Error Log Sheet setup completed.');
+    } catch (e) {
+        Logger.log(`CRITICAL ERROR during setupSheets for Error Log Sheet: ${e.toString()}`);
+    }
+
+    // 5. Setup Activity Log Sheet
+    try {
+        const systemSpreadsheet = safelyOpenSpreadsheetById(SYSTEM_SHEET_ID, "setupSheets - System Spreadsheet for Activity Log"); // Use helper
+        let activityLogSheet = systemSpreadsheet.getSheetByName(ACTIVITY_LOG_TAB_NAME);
+
+        if (!activityLogSheet) {
+            Logger.log(`Activity Log Sheet: Tab "${ACTIVITY_LOG_TAB_NAME}" not found. Creating.`);
+            activityLogSheet = systemSpreadsheet.insertSheet(ACTIVITY_LOG_TAB_NAME);
+            activityLogSheet.appendRow(ACTIVITY_LOG_HEADERS); // Add headers to new sheet
+            Logger.log(`Sheet '${ACTIVITY_LOG_TAB_NAME}' created with headers.`);
+        } else {
+            // If sheet exists, ensure headers are correct
+            const currentActivityLogHeaders = activityLogSheet.getRange(1, 1, 1, activityLogSheet.getLastColumn() || 1).getValues()[0];
+            if (JSON.stringify(currentActivityLogHeaders) !== JSON.stringify(ACTIVITY_LOG_HEADERS)) {
+                Logger.log(`Activity Log Sheet: Headers in "${ACTIVITY_LOG_TAB_NAME}" do not match. Updating headers.`);
+                activityLogSheet.clearContents(); // Clear content if headers are vastly different
+                activityLogSheet.getRange(1, 1, 1, ACTIVITY_LOG_HEADERS.length).setValues([ACTIVITY_LOG_HEADERS]);
+            }
+        }
+        Logger.log('Activity Log Sheet setup completed.');
+    } catch (e) {
+        Logger.log(`CRITICAL ERROR during setupSheets for Activity Log Sheet: ${e.toString()}`);
+    }
+    
+    Logger.log('All setupSheets processes completed.');
+}
+
+
+/**
+ * สำรอง Google Spreadsheet ทั้งไฟล์โดยสร้างสำเนาใน Google Drive
+ * และตั้งชื่อตามวันที่และเวลาปัจจุบัน
+ * สามารถตั้งเวลาให้รันอัตโนมัติได้
+ */
+function backupAllSpreadsheetsAutomatically() {
+    // SPREADSHEET_CONFIGS จะถูกดึงมาจาก Global Constants ด้านบนของไฟล์ Code.gs แล้ว
+    const userEmailForLog = Session.getActiveUser().getEmail(); // ดึงอีเมลผู้ใช้เพื่อ Log กิจกรรม
+    const usernameForLog = getLoggedInUsername() || 'System Auto Backup'; // ดึงชื่อผู้ใช้ หรือระบุว่าเป็น System
+
+    try {
+        const backupFolder = DriveApp.getFolderById(BACKUP_FOLDER_ID);
+        const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd_HH-mm-ss");
+        
+        Logger.log(`Starting backup of all configured spreadsheets to folder: ${backupFolder.getName()} (ID: ${BACKUP_FOLDER_ID})`);
+        logActivityToSheet(userEmailForLog, 'Automated Backup', `User '${usernameForLog}' started automated backup to folder '${backupFolder.getName()}'`, 'Success');
+
+        let backedUpFilesCount = 0;
+        let failedBackups = [];
+
+        SPREADSHEET_CONFIGS.forEach(config => {
+            try {
+                // ใช้ safelyOpenSpreadsheetById เพื่อตรวจสอบการเข้าถึงก่อนทำการสำเนา
+                const originalSpreadsheet = safelyOpenSpreadsheetById(config.id, `backupAllSpreadsheetsAutomatically - Source Spreadsheet (${config.name})`);
+                const originalFileName = originalSpreadsheet.getName();
+                const backupFileName = `${originalFileName}_Backup_${timestamp}`;
+                
+                const backupFile = DriveApp.getFileById(config.id).makeCopy(backupFileName, backupFolder);
+                Logger.log(`Backed up "${originalFileName}" to "${backupFileName}" (ID: ${backupFile.getId()})`);
+                backedUpFilesCount++;
+            } catch (e) {
+                const errorMessage = `Failed to backup spreadsheet "${config.name}" (ID: ${config.id}): ${e.message}`;
+                Logger.log(errorMessage);
+                logErrorToSheet("backupAllSpreadsheetsAutomatically", new Error(errorMessage + "\n" + e.stack)); // บันทึก Error ลงชีท
+                failedBackups.push(config.name);
+            }
+        });
+
+        if (failedBackups.length === 0) {
+            Logger.log("All configured spreadsheets backed up successfully.");
+            logActivityToSheet(userEmailForLog, 'Automated Backup', `User '${usernameForLog}' successfully backed up ${backedUpFilesCount} spreadsheets.`, 'Success');
+            return { success: true, message: `สำรองข้อมูล ${backedUpFilesCount} ไฟล์สำเร็จ` };
+        } else {
+            const message = `สำรองข้อมูลสำเร็จบางส่วน: ${backedUpFilesCount} ไฟล์ สำเร็จ, ${failedBackups.length} ไฟล์ ล้มเหลว (${failedBackups.join(', ')})`;
+            Logger.log(message);
+            logActivityToSheet(userEmailForLog, 'Automated Backup', `User '${usernameForLog}' backed up with errors: ${message}`, 'Failed');
+            return { success: false, message: message };
+        }
+
+    } catch (e) {
+        Logger.log("Error during automated backup: " + e.toString());
+        logErrorToSheet("backupAllSpreadsheetsAutomatically", e); // บันทึก Error ลงชีท
+        logActivityToSheet(userEmailForLog, 'Automated Backup', `User '${usernameForLog}' encountered critical error during backup: ${e.message}`, 'Failed');
+        return { success: false, message: "เกิดข้อผิดพลาดในการสำรองข้อมูล: " + e.message };
+    }
+}
+
+
+/**
+ * Migrates existing customer data to align with the latest header structure.
+ * This is crucial if new columns are added or column order changes.
+ * Accessible only by SUPER_USER.
+ */
+function migrateDataStructure() {
+    if (getLoggedInUserRole() !== USER_ROLES.SUPER_USER) {
+        const msg = 'Permission denied: Only SUPER_USER can run migrateDataStructure.';
+        Logger.log(msg);
+        return msg;
+    }
+
+    Logger.log('Starting data migration across all customer spreadsheets...');
+    let successCount = 0;
+    let errorCount = 0;
+
+    SPREADSHEET_CONFIGS.forEach(config => {
+        try {
+            const spreadsheet = safelyOpenSpreadsheetById(config.id, `migrateDataStructure - Spreadsheet (${config.name})`); // Use helper
+            Logger.log(`Processing spreadsheet: "${spreadsheet.getName()}" (ID: ${config.id})`);
+
+            Object.values(CUSTOMER_STATUS_TAB_NAMES).forEach(sheetName => {
+                try {
+                    const sheet = spreadsheet.getSheetByName(sheetName);
+                    if (!sheet) {
+                        Logger.log(`Sheet "${sheetName}" not found in "${spreadsheet.getName()}", skipping migration for this sheet.`);
+                        return;
+                    }
+
+                    Logger.log(`  Processing sheet: "${sheetName}"`);
+                    const currentDataRange = sheet.getDataRange();
+                    const currentValues = currentDataRange.getValues();
+
+                    let currentHeaders = [];
+                    let existingRows = [];
+
+                    if (currentValues.length > 0) {
+                        currentHeaders = currentValues[0];
+                        existingRows = currentValues.slice(1);
+                    }
+
+                    let newHeadersNeeded = false;
+                    let requiresReorder = false;
+
+                    // Check for missing headers and add them
+                    CUSTOMER_SHEET_HEADERS.forEach(requiredHeader => {
+                        if (currentHeaders.indexOf(requiredHeader) === -1) {
+                            currentHeaders.push(requiredHeader);
+                            newHeadersNeeded = true;
+                        }
+                    });
+
+                    // Check if reordering is needed (either new headers or different order)
+                    if (newHeadersNeeded || currentHeaders.length !== CUSTOMER_SHEET_HEADERS.length) {
+                        requiresReorder = true;
+                    } else {
+                        for (let i = 0; i < CUSTOMER_SHEET_HEADERS.length; i++) {
+                            if (currentHeaders[i] !== CUSTOMER_SHEET_HEADERS[i]) {
+                                requiresReorder = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (requiresReorder) {
+                        Logger.log(`    Reordering columns and data for sheet: "${sheetName}"`);
+                        const reorderedRows = existingRows.map(row => {
+                            const newRow = [];
+                            CUSTOMER_SHEET_HEADERS.forEach(reqHeader => {
+                                const oldIndex = currentHeaders.indexOf(reqHeader);
+                                newRow.push(oldIndex !== -1 ? row[oldIndex] : ''); // Keep old data or empty string
+                            });
+                            return newRow;
+                        });
+
+                        // Clear and rewrite sheet
+                        sheet.clearContents();
+                        sheet.getRange(1, 1, 1, CUSTOMER_SHEET_HEADERS.length).setValues([CUSTOMER_SHEET_HEADERS]);
+                        if (reorderedRows.length > 0) {
+                            sheet.getRange(2, 1, reorderedRows.length, CUSTOMER_SHEET_HEADERS.length).setValues(reorderedRows);
+                        }
+                        Logger.log(`    Migration complete for sheet: "${sheetName}"`);
+                        successCount++;
+                    } else {
+                        Logger.log(`    No migration needed for sheet: "${sheetName}"`);
+                    }
+                } catch (e) {
+                    logErrorToSheet(`migrateDataStructure - Sheet ${sheetName} in ${spreadsheet.getName()}`, e);
+                    Logger.log(`Error processing sheet "${sheetName}" in "${spreadsheet.getName()}": ${e.toString()}`);
+                    errorCount++;
+                }
+            });
+        } catch (e) {
+            // Error from safelyOpenSpreadsheetById is already logged, just continue
+            Logger.log(`Skipping spreadsheet ${config.name} during migration due to prior error.`);
+            errorCount++;
+        }
+    });
+    Logger.log(`Migration process complete. Successful: ${successCount}, Errors: ${errorCount}.`);
+    return `Migration/Setup for all customer sheet headers complete. Successful: ${successCount}, Errors: ${errorCount}.`;
+}
+
+/**
+ * Backfills missing 'ID', 'วันที่สร้าง', 'วันที่แก้ไขล่าสุด', and 'จำนวนการติดต่อ' data
+ * for existing rows in all customer sheets.
+ * This should be run after initial setup or data import if fields are missing.
+ * Accessible only by SUPER_USER.
+ */
+function backfillMissingData() {
+    if (getLoggedInUserRole() !== USER_ROLES.SUPER_USER) {
+        const msg = 'Permission denied: Only SUPER_USER can run backfillMissingData.';
+        Logger.log(msg);
+        return msg;
+    }
+
+    Logger.log('Starting to backfill missing data in customer sheets...');
+    const now = new Date();
+    let successCount = 0;
+    let errorCount = 0;
+
+    SPREADSHEET_CONFIGS.forEach(config => {
+        try {
+            const spreadsheet = safelyOpenSpreadsheetById(config.id, `backfillMissingData - Spreadsheet (${config.name})`); // Use helper
+            const timeZone = spreadsheet.getSpreadsheetTimeZone();
+            // const formattedDate = Utilities.formatDate(now, timeZone, "yyyy-MM-dd HH:mm:ss"); // Not used directly in loop
+            Logger.log(`Processing spreadsheet: "${spreadsheet.getName()}"`);
+
+            Object.values(CUSTOMER_STATUS_TAB_NAMES).forEach(tabName => {
+                try {
+                    const sheet = spreadsheet.getSheetByName(tabName);
+                    if (!sheet || sheet.getLastRow() <= 1) { // Skip if sheet doesn't exist or only has headers
+                        return;
+                    }
+
+                    Logger.log(`  Checking sheet: "${tabName}"`);
+                    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+                    const dataRange = sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length);
+                    const data = dataRange.getValues();
+
+                    const idIndex = headers.indexOf('ID');
+                    const createdIndex = headers.indexOf('วันที่สร้าง');
+                    const modifiedIndex = headers.indexOf('วันที่แก้ไขล่าสุด');
+                    const countIndex = headers.indexOf('จำนวนการติดต่อ');
+                    const commentIndex = headers.indexOf('คอมเม้น');
+
+                    let sheetUpdated = false;
+                    for (let i = 0; i < data.length; i++) {
+                        let row = data[i];
+                        let rowUpdated = false;
+
+                        // Backfill ID
+                        if (idIndex !== -1 && (!row[idIndex] || String(row[idIndex]).trim() === '')) {
+                            row[idIndex] = Utilities.getUuid();
+                            rowUpdated = true;
+                        }
+                        // Backfill Date Created
+                        if (createdIndex !== -1 && (!row[createdIndex] || String(row[createdIndex]).trim() === '')) {
+                            row[createdIndex] = now;
+                            rowUpdated = true;
+                        }
+                        // Backfill Last Modified
+                        if (modifiedIndex !== -1 && (!row[modifiedIndex] || String(row[modifiedIndex]).trim() === '')) {
+                            row[modifiedIndex] = now;
+                            rowUpdated = true;
+                        }
+                        // Backfill Contact Count based on existing comments
+                        if (countIndex !== -1 && (row[countIndex] === '' || row[countIndex] === null || row[countIndex] === undefined)) {
+                            const commentString = String(row[commentIndex] || '');
+                            // Count occurrences of date/time stamps in comments
+                            const commentCount = (commentString.match(/\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}( โดย [^\]]+)?\]:/g) || []).length;
+                            row[countIndex] = commentCount;
+                            rowUpdated = true;
+                        }
+                        if (rowUpdated) sheetUpdated = true;
+                    }
+
+                    if (sheetUpdated) {
+                        dataRange.setValues(data); // Write back updated data in one go
+                        Logger.log(`  Data backfilled for sheet: "${tabName}"`);
+                        successCount++;
+                    } else {
+                        Logger.log(`  No missing data to backfill in sheet: "${tabName}"`);
+                    }
+                } catch (e) {
+                    logErrorToSheet(`backfillMissingData - Sheet ${tabName} in ${spreadsheet.getName()}`, e);
+                    Logger.log(`Error backfilling sheet "${tabName}" in "${spreadsheet.getName()}": ${e.toString()}`);
+                    errorCount++;
+                }
+            });
+        } catch (e) {
+            // Error from safelyOpenSpreadsheetById is already logged, just continue
+            Logger.log(`Skipping spreadsheet ${config.name} during backfill due to prior error.`);
+            errorCount++;
+        }
+    });
+    Logger.log(`Backfill process complete. Successful: ${successCount}, Errors: ${errorCount}.`);
+    return `Backfill process complete. Successful: ${successCount}, Errors: ${errorCount}.`;
+}
+
+
+// --- CUSTOMER DATA OPERATIONS ---
+
+/**
+ * Handles form submission to save new customer data to a Google Sheet.
+ * @param {Object} formData - Data submitted from the HTML form.
+ * @returns {Object} Success status and message.
+ */
+function doPost(formData) {
+    const userEmail = Session.getActiveUser().getEmail();
+    const username = getLoggedInUsername() || 'Unknown User';
+    let result = { success: false, message: 'เกิดข้อผิดพลาดในการบันทึกข้อมูล' };
+
+    try {
+        const userRole = getLoggedInUserRole();
+        if (!userRole) {
+            result.message = 'คุณไม่มีสิทธิ์ในการบันทึกข้อมูล';
+            logActivityToSheet(userEmail, 'Add Customer', `Attempt to add customer without login: ${formData.companyName}`, 'Failed');
+            return result;
+        }
+
+        const targetSpreadsheetName = formData.targetSpreadsheetName;
+        if (!hasUserSheetAccess(targetSpreadsheetName)) {
+            result.message = `คุณไม่มีสิทธิ์บันทึกข้อมูลลงในชีท "${targetSpreadsheetName || 'ที่ไม่ได้เลือก'}"`;
+            logActivityToSheet(userEmail, 'Add Customer', `User '${username}' denied access to sheet ${targetSpreadsheetName} for adding: ${formData.companyName}`, 'Failed');
+            return result;
+        }
+
+        const config = SPREADSHEET_CONFIGS.find(c => c.name === targetSpreadsheetName);
+        if (!config) {
+            throw new Error(`ไม่พบการตั้งค่าสำหรับชีท: ${targetSpreadsheetName}`);
+        }
+        const spreadsheet = safelyOpenSpreadsheetById(config.id, `doPost - Customer Spreadsheet (${config.name})`); // Use helper
+        const sheet = getSheetByNameOrThrow(spreadsheet, CUSTOMER_STATUS_TAB_NAMES[formData.status]);
+
+        const now = new Date();
+        const formattedDate = Utilities.formatDate(now, spreadsheet.getSpreadsheetTimeZone(), "yyyy-MM-dd HH:mm:ss");
+        
+
+        const rowData = CUSTOMER_SHEET_HEADERS.map(header => {
+            const fieldName = CUSTOMER_HEADERS_MAPPING[header];
+            switch (fieldName) {
+                case 'id': return generateUniqueId();
+                case 'dateCreated': return now; // Store as Date object for proper sorting/formatting later
+                case 'lastModified': return now; // Store as Date object
+                case 'comment':
+                    return formData[fieldName] ? `[${formattedDate} โดย ${username}]: ${formData[fieldName]}` : '';
+                case 'contactCount':
+                    return formData.comment ? 1 : 0; // Increment contact count if comment is added
+                case 'usedProduct':
+                    // Ensure JSON string is handled correctly
+                    try {
+                        const parsed = JSON.parse(formData[fieldName] || '[]');
+                        return JSON.stringify(parsed); // Re-stringify to ensure valid JSON
+                    } catch (e) {
+                        Logger.log(`Warning: Failed to parse usedProduct for new entry: ${formData[fieldName]}`);
+                        return formData[fieldName] || '[]'; // Fallback to raw string if parsing fails
+                    }
+                default: return formData[fieldName] || '';
+            }
+        });
+
+        sheet.appendRow(rowData);
+        Logger.log(`New customer data saved to ${targetSpreadsheetName}, tab ${formData.status}.`);
+        result = { success: true, message: 'บันทึกข้อมูลลูกค้าเรียบร้อยแล้ว!' };
+        logActivityToSheet(userEmail, 'Add Customer', `User '${username}' added customer '${formData.companyName}' (ID: ${rowData[CUSTOMER_SHEET_HEADERS.indexOf('ID')]}) to sheet '${targetSpreadsheetName}' tab '${formData.status}'`, 'Success');
+        return result;
+
+    } catch (error) {
+        logErrorToSheet("doPost", error);
+        result.message = 'เกิดข้อผิดพลาดในการบันทึกข้อมูล: ' + error.message;
+        logActivityToSheet(userEmail, 'Add Customer', `User '${username}' failed to add customer '${formData.companyName}': ${error.message}`, 'Failed');
+        return result;
+    }
+}
+
+/**
+ * Retrieves customer data from a specified spreadsheet and status tabs.
+ * @param {string} targetSpreadsheetName - The name of the spreadsheet to fetch data from.
+ * @param {string[]} selectedStatusFilters - An array of customer status tab names to include, or ['ทั้งหมด'] for all.
+ * @returns {Object} Success status, message, and the data (including headers).
+ */
+function getCustomerData(targetSpreadsheetName, selectedStatusFilters) {
+    try {
+        if (!getLoggedInUserRole()) {
+            return { success: false, message: 'กรุณาเข้าสู่ระบบเพื่อดูข้อมูล', data: [] };
+        }
+
+        if (!hasUserSheetAccess(targetSpreadsheetName)) {
+            return { success: false, message: `คุณไม่มีสิทธิ์ดูข้อมูลในชีท "${targetSpreadsheetName || 'ที่ไม่ได้เลือก'}"`, data: [] };
+        }
+
+        const config = SPREADSHEET_CONFIGS.find(c => c.name === targetSpreadsheetName);
+        if (!config) {
+            throw new Error(`ไม่พบการตั้งค่าสำหรับชีท: ${targetSpreadsheetName}`);
+        }
+        const spreadsheet = safelyOpenSpreadsheetById(config.id, `getCustomerData - Customer Spreadsheet (${config.name})`); // Use helper
+        let allCustomerData = [];
+
+        const tabsToRead = selectedStatusFilters.includes('ทั้งหมด')
+            ? Object.values(CUSTOMER_STATUS_TAB_NAMES)
+            : selectedStatusFilters.filter(name => CUSTOMER_STATUS_TAB_NAMES[name]);
+
+        tabsToRead.forEach(tabName => {
+            try {
+                const sheet = spreadsheet.getSheetByName(tabName);
+                if (sheet && sheet.getLastRow() > 1) {
+                    // Get all values, including raw dates
+                    const sheetData = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+                    
+                    // Format dates to string for client-side display consistency
+                    const dateCreatedIndex = CUSTOMER_SHEET_HEADERS.indexOf('วันที่สร้าง');
+                    const lastModifiedIndex = CUSTOMER_SHEET_HEADERS.indexOf('วันที่แก้ไขล่าสุด');
+                    const timeZone = spreadsheet.getSpreadsheetTimeZone();
+
+                    const formattedSheetData = sheetData.map(row => {
+                        const newRow = [...row]; // Create a copy of the row
+                        if (dateCreatedIndex !== -1 && newRow[dateCreatedIndex] instanceof Date) {
+                            newRow[dateCreatedIndex] = Utilities.formatDate(newRow[dateCreatedIndex], timeZone, "yyyy-MM-dd HH:mm:ss");
+                        }
+                        if (lastModifiedIndex !== -1 && newRow[lastModifiedIndex] instanceof Date) {
+                            newRow[lastModifiedIndex] = Utilities.formatDate(newRow[lastModifiedIndex], timeZone, "yyyy-MM-dd HH:mm:ss");
+                        }
+                        return newRow;
+                    });
+                    allCustomerData.push(...formattedSheetData);
+                }
+            } catch (e) {
+                logErrorToSheet(`getCustomerData - Sheet ${tabName} in ${targetSpreadsheetName}`, e);
+                Logger.log(`Error processing sheet "${tabName}" in "${targetSpreadsheetName}": ${e.toString()}`);
+            }
+        });
+
+        if (allCustomerData.length === 0) {
+            return { success: true, message: 'ไม่มีข้อมูลลูกค้าสำหรับแท็บที่เลือก', data: [] };
+        }
+
+        Logger.log(`Successfully fetched ${allCustomerData.length} customer records from ${targetSpreadsheetName}.`);
+        return { success: true, message: 'ดึงข้อมูลสำเร็จ', data: [CUSTOMER_SHEET_HEADERS].concat(allCustomerData) };
+    } catch (error) {
+        logErrorToSheet("getCustomerData", error);
+        return { success: false, message: 'เกิดข้อผิดพลาดในการดึงข้อมูล: ' + error.message, data: [] };
+    }
+}
+
+/**
+ * Updates an existing customer record. Handles changes in data and status (moving rows between sheets).
+ * @param {Object} dataToUpdate - Contains target spreadsheet, original row data, and updated fields.
+ * @returns {Object} Success status and message.
+ */
+function updateCustomerData(dataToUpdate) {
+    const userEmail = Session.getActiveUser().getEmail();
+    const username = getLoggedInUsername() || 'Unknown User';
+    let result = { success: false, message: 'เกิดข้อผิดพลาดในการแก้ไขข้อมูล' };
+
+    try {
+        const userRole = getLoggedInUserRole();
+        if (!userRole) {
+            result.message = 'คุณไม่มีสิทธิ์ในการแก้ไขข้อมูล';
+            logActivityToSheet(userEmail, 'Update Customer', `Attempt to update customer '${dataToUpdate.originalRow[CUSTOMER_SHEET_HEADERS.indexOf('ID')] || 'N/A'}' without login`, 'Failed');
+            return result;
+        }
+
+        const config = SPREADSHEET_CONFIGS.find(c => c.name === dataToUpdate.targetSpreadsheetName);
+        if (!config) {
+            throw new Error(`ไม่พบการตั้งค่าสำหรับชีท: ${dataToUpdate.targetSpreadsheetName}`);
+        }
+        const spreadsheet = safelyOpenSpreadsheetById(config.id, `updateCustomerData - Customer Spreadsheet (${config.name})`); // Use helper
+
+        const uniqueIdIndex = CUSTOMER_SHEET_HEADERS.indexOf('ID');
+        const uniqueId = dataToUpdate.originalRow[uniqueIdIndex];
+        if (!uniqueId) {
+            throw new Error('ไม่พบ Unique ID สำหรับข้อมูลลูกค้าที่ต้องการแก้ไข');
+        }
+
+        let foundSheet = null;
+        let foundRowIndex = -1; // 1-based index in sheet
+        let companyNameForLog = 'N/A'; // For logging
+
+        // Search for the row across all status tabs
+        for (const statusName of Object.values(CUSTOMER_STATUS_TAB_NAMES)) {
+            const sheet = spreadsheet.getSheetByName(statusName);
+            if (sheet && sheet.getLastRow() > 1) {
+                // Get only the ID column to efficiently find the row
+                const idsAndNames = sheet.getRange(2, 1, sheet.getLastRow() - 1, CUSTOMER_SHEET_HEADERS.length).getValues(); // Get entire row to find company name
+                const rowIndexInSheet = idsAndNames.findIndex(row => row[uniqueIdIndex] === uniqueId); 
+                if (rowIndexInSheet !== -1) {
+                    foundSheet = sheet;
+                    foundRowIndex = rowIndexInSheet + 2; // Convert to 1-based sheet row index
+                    companyNameForLog = idsAndNames[rowIndexInSheet][CUSTOMER_SHEET_HEADERS.indexOf('ชื่อบริษัท')] || 'N/A';
+                    break;
+                }
+            }
+        }
+
+        if (!foundSheet) {
+            result.message = 'ไม่พบข้อมูลลูกค้าที่ต้องการแก้ไข';
+            logActivityToSheet(userEmail, 'Update Customer', `User '${username}' failed to find customer ID '${uniqueId}' for update`, 'Failed');
+            return result;
+        }
+
+        // Get the current values of the row to merge with updated fields
+        const currentRowValues = foundSheet.getRange(foundRowIndex, 1, 1, CUSTOMER_SHEET_HEADERS.length).getValues()[0];
+        const oldStatus = currentRowValues[CUSTOMER_SHEET_HEADERS.indexOf('สถานะ')];
+        const newStatus = dataToUpdate.updatedFields.status || oldStatus; // Use new status if provided, else keep old
+
+        const now = new Date();
+        const timeZone = spreadsheet.getSpreadsheetTimeZone();
+        const formattedDate = Utilities.formatDate(now, timeZone, "yyyy-MM-dd HH:mm:ss");
+        const todayString = Utilities.formatDate(now, timeZone, "yyyy-MM-dd");
+        
+
+        const lastModifiedIndex = CUSTOMER_SHEET_HEADERS.indexOf('วันที่แก้ไขล่าสุด');
+        const commentIndex = CUSTOMER_SHEET_HEADERS.indexOf('คอมเม้น');
+        const contactCountIndex = CUSTOMER_SHEET_HEADERS.indexOf('จำนวนการติดต่อ');
+
+        let currentContactCount = Number(currentRowValues[contactCountIndex] || 0);
+
+        // Update contact count if a new comment is added on a new day
+        const oldComment = String(currentRowValues[commentIndex] || '');
+        const newCommentText = dataToUpdate.updatedFields.comment ? String(dataToUpdate.updatedFields.comment).trim() : '';
+
+        // Extract last comment date from old comment to check if new comment is on a different day
+        const lastCommentDateMatch = oldComment.match(/\[(\d{4}-\d{2}-\d{2})/);
+        const lastCommentDateString = lastCommentDateMatch ? lastCommentDateMatch[1] : null;
+
+        // Check if there's a new comment and it's on a different date than the last modification or old comment
+        // This logic ensures contact count increments once per day per new comment activity
+        if (newCommentText !== '' && newCommentText !== oldComment && lastCommentDateString !== todayString) {
+             currentContactCount++;
+        }
+        // If the old comment was empty and a new comment is added, always increment
+        if (oldComment === '' && newCommentText !== '') {
+            currentContactCount = (currentContactCount === 0) ? 1 : currentContactCount; // Ensure it becomes at least 1
+        }
+        
+        // Construct the final updated row data
+        const finalRowData = CUSTOMER_SHEET_HEADERS.map(header => {
+            const fieldName = CUSTOMER_HEADERS_MAPPING[header];
+            const headerIndex = CUSTOMER_SHEET_HEADERS.indexOf(header);
+
+            if (fieldName === 'lastModified') return now; // Always update last modified date
+            if (fieldName === 'dateCreated') return currentRowValues[headerIndex]; // Date created never changes
+            if (fieldName === 'contactCount') return currentContactCount;
+
+            if (fieldName === 'comment') {
+                if (newCommentText === '') {
+                    return oldComment; // If new comment is empty, keep old comment
+                } else {
+                    // Prepend new comment with timestamp and user to existing comments
+                    const newFormattedComment = `[${formattedDate} โดย ${username}]: ${newCommentText}`;
+                    // Only add if the new comment text is actually new/different
+                    if (oldComment.startsWith(newFormattedComment.substring(0, newFormattedComment.indexOf(']') + 1)) ) { // Check if the new formatted comment already exists at the beginning of old comment
+                        return oldComment; // New comment is already the latest, don't duplicate
+                    } else if (oldComment && !newFormattedComment.includes(oldComment)) { // If old comment exists and is genuinely different
+                        return newFormattedComment + '\n' + oldComment;
+                    } else { // No old comment or new comment completely replaces it
+                        return newFormattedComment;
+                    }
+                }
+            }
+            if (fieldName === 'usedProduct') {
+                 // Ensure JSON string is handled correctly for usedProduct
+                try {
+                    const parsed = JSON.parse(dataToUpdate.updatedFields.hasOwnProperty(fieldName) ? dataToUpdate.updatedFields[fieldName] : currentRowValues[headerIndex] || '[]');
+                    return JSON.stringify(parsed);
+                } catch (e) {
+                    Logger.log(`Warning: Failed to parse usedProduct for update: ${dataToUpdate.updatedFields[fieldName]}`);
+                    return dataToUpdate.updatedFields.hasOwnProperty(fieldName) ? dataToUpdate.updatedFields[fieldName] : currentRowValues[headerIndex] || '[]';
+                }
+            }
+
+            // For other fields, use the updated value if present, otherwise keep the current value
+            return dataToUpdate.updatedFields.hasOwnProperty(fieldName) ? dataToUpdate.updatedFields[fieldName] : currentRowValues[headerIndex];
+        });
+
+        // Handle status change: move row to new sheet
+        if (oldStatus !== newStatus) {
+            const newSheet = getSheetByNameOrThrow(spreadsheet, newStatus);
+            newSheet.appendRow(finalRowData); // Add row to new status sheet
+            foundSheet.deleteRow(foundRowIndex); // Delete from old status sheet
+            Logger.log(`Customer ${uniqueId} moved from ${oldStatus} to ${newStatus} and updated.`);
+            result = { success: true, message: `ย้ายและแก้ไขข้อมูลลูกค้าเรียบร้อยแล้ว!` };
+            logActivityToSheet(userEmail, 'Update Customer (Status Change)', `User '${username}' moved customer '${companyNameForLog}' (ID: ${uniqueId}) from '${oldStatus}' to '${newStatus}'`, 'Success');
+            return result;
+        } else {
+            // No status change: update row in the same sheet
+            foundSheet.getRange(foundRowIndex, 1, 1, finalRowData.length).setValues([finalRowData]);
+            Logger.log(`Customer ${uniqueId} updated in ${oldStatus} tab.`);
+            result = { success: true, message: 'แก้ไขข้อมูลลูกค้าเรียบร้อยแล้ว!' };
+            logActivityToSheet(userEmail, 'Update Customer', `User '${username}' updated customer '${companyNameForLog}' (ID: ${uniqueId}) in '${oldStatus}' tab`, 'Success');
+            return result;
+        }
+    } catch (e) {
+        logErrorToSheet("updateCustomerData", e);
+        result.message = 'เกิดข้อผิดพลาดในการแก้ไขข้อมูล: ' + e.message;
+        logActivityToSheet(userEmail, 'Update Customer', `User '${username}' failed to update customer '${dataToUpdate.originalRow[CUSTOMER_SHEET_HEADERS.indexOf('ID')] || 'N/A'}' (Company: ${companyNameForLog}): ${e.message}`, 'Failed');
+        return result;
+    }
+}
+
+/**
+ * Deletes a customer record by its unique ID.
+ * @param {Object} dataToDelete - Contains target spreadsheet and original row data (with ID).
+ * @returns {Object} Success status and message.
+ */
+function deleteCustomerData(dataToDelete) {
+    const userEmail = Session.getActiveUser().getEmail();
+    const username = getLoggedInUsername() || 'Unknown User';
+    let result = { success: false, message: 'เกิดข้อผิดพลาดในการลบข้อมูล' };
+
+    try {
+        if (getLoggedInUserRole() !== USER_ROLES.SUPER_USER) { // Only SUPER_USER can delete
+            result.message = 'คุณไม่มีสิทธิ์ในการลบข้อมูล';
+            logActivityToSheet(userEmail, 'Delete Customer', `Attempt to delete customer '${dataToDelete.originalRow[CUSTOMER_SHEET_HEADERS.indexOf('ID')] || 'N/A'}' without SUPER_USER role`, 'Failed');
+            return result;
+        }
+
+        const config = SPREADSHEET_CONFIGS.find(c => c.name === dataToDelete.targetSpreadsheetName);
+        if (!config) {
+            throw new Error(`ไม่พบการตั้งค่าสำหรับชีท: ${dataToDelete.targetSpreadsheetName}`);
+        }
+        const spreadsheet = safelyOpenSpreadsheetById(config.id, `deleteCustomerData - Customer Spreadsheet (${config.name})`); // Use helper
+
+        const idColIndex = CUSTOMER_SHEET_HEADERS.indexOf('ID');
+        const uniqueId = dataToDelete.originalRow[idColIndex];
+        if (!uniqueId) {
+            throw new Error('ไม่พบ Unique ID สำหรับข้อมูลลูกค้าที่ต้องการลบ');
+        }
+
+        let companyNameForLog = 'N/A';
+        // Search through all status sheets to find and delete the row
+        for (const statusName of Object.values(CUSTOMER_STATUS_TAB_NAMES)) {
+            const sheet = spreadsheet.getSheetByName(statusName);
+            if (sheet && sheet.getLastRow() > 1) {
+                const idsAndNames = sheet.getRange(2, 1, sheet.getLastRow() - 1, CUSTOMER_SHEET_HEADERS.length).getValues();
+                const rowIndexInSheet = idsAndNames.findIndex(row => row[idColIndex] === uniqueId); 
+                if (rowIndexInSheet !== -1) {
+                    companyNameForLog = idsAndNames[rowIndexInSheet][CUSTOMER_SHEET_HEADERS.indexOf('ชื่อบริษัท')] || 'N/A';
+                    sheet.deleteRow(rowIndexInSheet + 2); // Convert to 1-based sheet row index
+                    Logger.log(`Customer ${uniqueId} deleted from ${statusName} tab.`);
+                    result = { success: true, message: 'ลบข้อมูลลูกค้าเรียบร้อยแล้ว!' };
+                    logActivityToSheet(userEmail, 'Delete Customer', `User '${username}' deleted customer '${companyNameForLog}' (ID: ${uniqueId}) from sheet '${dataToDelete.targetSpreadsheetName}' tab '${statusName}'`, 'Success');
+                    return result;
+                }
+            }
+        }
+        result.message = 'ไม่พบข้อมูลลูกค้าที่ต้องการลบ';
+        logActivityToSheet(userEmail, 'Delete Customer', `User '${username}' failed to find customer ID '${uniqueId}' for deletion`, 'Failed');
+        return result;
+
+    } catch (e) {
+        logErrorToSheet("deleteCustomerData", e);
+        result.message = 'เกิดข้อผิดพลาดในการลบข้อมูล: ' + e.message;
+        logActivityToSheet(userEmail, 'Delete Customer', `User '${username}' failed to delete customer ID '${dataToDelete.originalRow[CUSTOMER_SHEET_HEADERS.indexOf('ID')] || 'N/A'}' (Company: ${companyNameForLog}): ${e.message}`, 'Failed');
+        return result;
+    }
+}
+
+// --- USER MANAGEMENT FUNCTIONS (ADMIN PAGE) ---
+
+/**
+ * Retrieves all user data for the admin page.
+ * Accessible only by SUPER_USER.
+ * @returns {Object} Success status and array of user data (including headers).
+ */
+function getUsers() {
+    try {
+        if (getLoggedInUserRole() !== USER_ROLES.SUPER_USER) {
+            return { success: false, message: 'คุณไม่มีสิทธิ์ในการดูข้อมูลผู้ใช้', data: [] };
+        }
+        const spreadsheet = safelyOpenSpreadsheetById(USERS_SHEET_ID, "getUsers - Users Spreadsheet"); // Use helper
+        const usersSheet = getSheetByNameOrThrow(spreadsheet, USERS_TAB_NAME);
+        if (!usersSheet || usersSheet.getLastRow() < 1) { // Check for at least headers
+            return { success: true, message: 'ไม่พบข้อมูลผู้ใช้', data: [] };
+        }
+        return { success: true, data: usersSheet.getDataRange().getValues() };
+    } catch (e) {
+        logErrorToSheet("getUsers", e);
+        return { success: false, message: 'เกิดข้อผิดพลาดในการดึงข้อมูลผู้ใช้: ' + e.message };
+    }
+}
+
+/**
+ * Adds a new user to the Users sheet.
+ * Accessible only by SUPER_USER.
+ * @param {Object} userData - Contains username, password (raw), role, and allowedSheets array.
+ * @returns {Object} Success status and message.
+ */
+function addUser(userData) {
+    const userEmail = Session.getActiveUser().getEmail();
+    const username = getLoggedInUsername() || 'Unknown User';
+    let result = { success: false, message: 'เกิดข้อผิดพลาดในการเพิ่มผู้ใช้' };
+
+    try {
+        if (getLoggedInUserRole() !== USER_ROLES.SUPER_USER) {
+            result.message = 'คุณไม่มีสิทธิ์เพิ่มผู้ใช้';
+            logActivityToSheet(userEmail, 'Add User', `Attempt to add user '${userData.username}' without SUPER_USER role`, 'Failed');
+            return result;
+        }
+        const spreadsheet = safelyOpenSpreadsheetById(USERS_SHEET_ID, "addUser - Users Spreadsheet"); // Use helper
+        const sheet = getSheetByNameOrThrow(spreadsheet, USERS_TAB_NAME);
+        const existingUsernames = sheet.getLastRow() > 1 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues().flat().map(String) : []; // Map to String
+        if (existingUsernames.includes(userData.username)) {
+            result.message = `ชื่อผู้ใช้ "${userData.username}" มีอยู่แล้ว`;
+            logActivityToSheet(userEmail, 'Add User', `User '${username}' failed to add user '${userData.username}': Username already exists`, 'Failed');
+            return result;
+        }
+        const hashedPassword = hashString(userData.password);
+        sheet.appendRow([userData.username, hashedPassword, userData.role, userData.allowedSheets.join(',')]);
+        Logger.log(`User ${userData.username} added successfully.`);
+        result = { success: true, message: 'เพิ่มผู้ใช้สำเร็จ!' };
+        logActivityToSheet(userEmail, 'Add User', `User '${username}' added new user '${userData.username}' with role '${userData.role}'`, 'Success');
+        return result;
+    } catch (e) {
+        logErrorToSheet("addUser", e);
+        result.message = 'เกิดข้อผิดพลาดในการเพิ่มผู้ใช้: ' + e.message;
+        logActivityToSheet(userEmail, 'Add User', `User '${username}' failed to add user '${userData.username}': ${e.message}`, 'Failed');
+        return result;
+    }
+}
+
+/**
+ * Updates an existing user's information.
+ * Accessible only by SUPER_USER.
+ * @param {Object} userData - Contains originalUsername, newUsername, newPassword (raw, optional), newRole, newAllowedSheets.
+ * @returns {Object} Success status and message.
+ */
+function updateUser(userData) {
+    const userEmail = Session.getActiveUser().getEmail();
+    const username = getLoggedInUsername() || 'Unknown User';
+    let result = { success: false, message: 'เกิดข้อผิดพลาดในการแก้ไขผู้ใช้' };
+
+    try {
+        if (getLoggedInUserRole() !== USER_ROLES.SUPER_USER) {
+            result.message = 'คุณไม่มีสิทธิ์แก้ไขผู้ใช้';
+            logActivityToSheet(userEmail, 'Update User', `Attempt to update user '${userData.originalUsername}' without SUPER_USER role`, 'Failed');
+            return result;
+        }
+        const spreadsheet = safelyOpenSpreadsheetById(USERS_SHEET_ID, "updateUser - Users Spreadsheet"); // Use helper
+        const sheet = getSheetByNameOrThrow(spreadsheet, USERS_TAB_NAME);
+        const data = sheet.getDataRange().getValues();
+        const rowIndex = data.findIndex(row => String(row[0]).trim() === userData.originalUsername); // Ensure string comparison
+
+        if (rowIndex === -1) {
+            result.message = `ไม่พบผู้ใช้ "${userData.originalUsername}"`;
+            logActivityToSheet(userEmail, 'Update User', `User '${username}' failed to find user '${userData.originalUsername}' for update`, 'Failed');
+            return result;
+        }
+
+        // Check if new username conflicts with existing usernames (excluding the user being updated)
+        if (userData.newUsername !== userData.originalUsername) {
+            const existingUsernames = data.slice(1).map(row => String(row[0]).trim()); // Exclude header row, map to String
+            if (existingUsernames.includes(userData.newUsername)) {
+                result.message = `ชื่อผู้ใช้ใหม่ "${userData.newUsername}" มีอยู่แล้ว`;
+                logActivityToSheet(userEmail, 'Update User', `User '${username}' failed to update user '${userData.originalUsername}': New username '${userData.newUsername}' already exists`, 'Failed');
+                return result;
+            }
+        }
+
+        // Capture changes for log details
+        const oldUserData = data[rowIndex];
+        const changes = [];
+        if (oldUserData[0] !== userData.newUsername) changes.push(`Username: '${oldUserData[0]}' -> '${userData.newUsername}'`);
+        if (userData.newPassword && String(userData.newPassword).trim() !== '') changes.push(`Password: Changed`);
+        if (oldUserData[2] !== userData.newRole) changes.push(`Role: '${oldUserData[2]}' -> '${userData.newRole}'`);
+        const oldAllowedSheets = (oldUserData[3] || '').split(',').map(s => s.trim()).filter(Boolean).sort().join(',');
+        const newAllowedSheets = userData.newAllowedSheets.filter(Boolean).sort().join(',');
+        if (oldAllowedSheets !== newAllowedSheets) changes.push(`Allowed Sheets: Changed`);
+
+        // Update values in the data array
+        data[rowIndex][0] = userData.newUsername;
+        if (userData.newPassword && String(userData.newPassword).trim() !== '') {
+            data[rowIndex][1] = hashString(userData.newPassword); // Hash new password
+        }
+        data[rowIndex][2] = userData.newRole;
+        data[rowIndex][3] = userData.newAllowedSheets.join(',');
+
+        // Write the entire updated data range back to the sheet
+        sheet.getRange(1, 1, data.length, data[0].length).setValues(data);
+        Logger.log(`User ${userData.originalUsername} updated to ${userData.newUsername}.`);
+        result = { success: true, message: 'แก้ไขผู้ใช้สำเร็จ!' };
+        logActivityToSheet(userEmail, 'Update User', `User '${username}' updated user '${userData.originalUsername}'. Changes: ${changes.join('; ')}`, 'Success');
+        return result;
+    } catch (e) {
+        logErrorToSheet("updateUser", e);
+        result.message = 'เกิดข้อผิดพลาดในการแก้ไขผู้ใช้: ' + e.message;
+        logActivityToSheet(userEmail, 'Update User', `User '${username}' failed to update user '${userData.originalUsername}': ${e.message}`, 'Failed');
+        return result;
+    }
+}
+
+/**
+ * Deletes a user from the Users sheet.
+ * Accessible only by SUPER_USER. Cannot delete the currently logged-in user.
+ * @param {string} usernameToDelete - The username of the user to delete.
+ * @returns {Object} Success status and message.
+ */
+function deleteUser(usernameToDelete) {
+    const userEmail = Session.getActiveUser().getEmail();
+    const username = getLoggedInUsername() || 'Unknown User';
+    let result = { success: false, message: 'เกิดข้อผิดพลาดในการลบผู้ใช้' };
+
+    try {
+        if (getLoggedInUserRole() !== USER_ROLES.SUPER_USER) {
+            result.message = 'คุณไม่มีสิทธิ์ลบผู้ใช้';
+            logActivityToSheet(userEmail, 'Delete User', `Attempt to delete user '${usernameToDelete}' without SUPER_USER role`, 'Failed');
+            return result;
+        }
+        if (usernameToDelete === getLoggedInUsername()) {
+            result.message = 'ไม่สามารถลบผู้ใช้ที่กำลังใช้งานอยู่ได้';
+            logActivityToSheet(userEmail, 'Delete User', `User '${username}' attempted to delete self ('${usernameToDelete}')`, 'Failed');
+            return result;
+        }
+
+        const spreadsheet = safelyOpenSpreadsheetById(USERS_SHEET_ID, "deleteUser - Users Spreadsheet"); // Use helper
+        const sheet = getSheetByNameOrThrow(spreadsheet, USERS_TAB_NAME);
+        const data = sheet.getDataRange().getValues();
+        const rowIndex = data.findIndex(row => String(row[0]).trim() === usernameToDelete); // 0-based index, ensure string comparison
+
+        if (rowIndex === -1) {
+            result.message = `ไม่พบผู้ใช้ "${usernameToDelete}"`;
+            logActivityToSheet(userEmail, 'Delete User', `User '${username}' failed to find user '${usernameToDelete}' for deletion`, 'Failed');
+            return result;
+        }
+        
+        // Delete row (1-based index)
+        sheet.deleteRow(rowIndex + 1); 
+        Logger.log(`User ${usernameToDelete} deleted successfully.`);
+        result = { success: true, message: 'ลบผู้ใช้สำเร็จ!' };
+        logActivityToSheet(userEmail, 'Delete User', `User '${username}' deleted user '${usernameToDelete}'`, 'Success');
+        return result;
+    } catch (e) {
+        logErrorToSheet("deleteUser", e);
+        result.message = 'เกิดข้อผิดพลาดในการลบผู้ใช้: ' + e.message;
+        logActivityToSheet(userEmail, 'Delete User', `User '${username}' failed to delete user '${usernameToDelete}': ${e.message}`, 'Failed');
+        return result;
+    }
+}
+
+// --- PRODUCT LIST MANAGEMENT ---
+
+/**
+ * Retrieves the list of available products and services from the ProductList sheet.
+ * @returns {Object} Success status and an array of product objects ({name: string, type: string}).
+ */
+function getAvailableProductsFromSheet() {
+    try {
+        const productListSpreadsheet = safelyOpenSpreadsheetById(PRODUCT_LIST_SHEET_ID, "getAvailableProductsFromSheet - Product List Spreadsheet"); // Use helper
+        let productListSheet = getSheetByNameOrThrow(productListSpreadsheet, PRODUCT_LIST_TAB_NAME);
+
+        const data = productListSheet.getDataRange().getValues();
+        if (data.length < 2) { // Only headers exist
+            return { success: true, message: 'ไม่มีข้อมูลสินค้า/บริการในชีท', data: [] };
+        }
+
+        const headers = data[0];
+        const productsRaw = data.slice(1);
+
+        const nameIndex = headers.indexOf(PRODUCT_LIST_HEADERS[0]);
+        const typeIndex = headers.indexOf(PRODUCT_LIST_HEADERS[1]);
+
+        if (nameIndex === -1 || typeIndex === -1) {
+            throw new Error(`ไม่พบคอลัมน์ "${PRODUCT_LIST_HEADERS[0]}" หรือ "${PRODUCT_LIST_HEADERS[1]}" ในชีท ${PRODUCT_LIST_TAB_NAME}`);
+        }
+
+        const products = productsRaw.map(row => ({
+            name: String(row[nameIndex] || '').trim(), // Ensure string and trim
+            type: String(row[typeIndex] || '').trim()   // Ensure string and trim
+        })).filter(p => p.name !== ''); // Filter out rows with empty product names
+
+        products.sort((a, b) => a.name.localeCompare(b.name, 'th')); // Sort alphabetically by name (Thai locale)
+
+        Logger.log(`Fetched ${products.length} products from ProductList sheet.`);
+        return { success: true, message: 'ดึงรายการสินค้า/บริการสำเร็จ', data: products };
+
+    } catch (error) {
+        logErrorToSheet("getAvailableProductsFromSheet", error);
+        return { success: false, message: 'เกิดข้อผิดพลาดในการดึงรายการสินค้า/บริการ: ' + error.message, data: [] };
+    }
+}
+
+/**
+ * Adds a new product to the ProductList sheet.
+ * Accessible only by SUPER_USER.
+ * @param {Object} productData - Contains name and type of the product.
+ * @param {string} productData.name - The name of the product/service.
+ * @param {string} productData.type - The type ('สินค้า' or 'บริการ').
+ * @returns {Object} Success status and message.
+ */
+function addProductToSheet(productData) {
+    const userEmail = Session.getActiveUser().getEmail();
+    const username = getLoggedInUsername() || 'Unknown User';
+    let result = { success: false, message: 'เกิดข้อผิดพลาดในการเพิ่มรายการ' };
+
+    try {
+        if (getLoggedInUserRole() !== USER_ROLES.SUPER_USER) {
+            result.message = 'คุณไม่มีสิทธิ์เพิ่มรายการ';
+            logActivityToSheet(userEmail, 'Add Product', `Attempt to add product '${productData.name}' without SUPER_USER role`, 'Failed');
+            return result;
+        }
+        
+        // Data Validation
+        const name = String(productData.name || '').trim();
+        const type = String(productData.type || '').trim();
+
+        if (!name) {
+            result.message = 'กรุณากรอกชื่อสินค้า/บริการ';
+            logActivityToSheet(userEmail, 'Add Product', `User '${username}' failed to add product: No name provided`, 'Failed');
+            return result;
+        }
+        if (!['สินค้า', 'บริการ'].includes(type)) {
+            result.message = 'ประเภทสินค้า/บริการไม่ถูกต้อง ควรเป็น "สินค้า" หรือ "บริการ" เท่านั้น';
+            logActivityToSheet(userEmail, 'Add Product', `User '${username}' failed to add product '${name}': Invalid type '${type}'`, 'Failed');
+            return result;
+        }
+
+        const spreadsheet = safelyOpenSpreadsheetById(PRODUCT_LIST_SHEET_ID, "addProductToSheet - Product List Spreadsheet"); // Use helper
+        const sheet = getSheetByNameOrThrow(spreadsheet, PRODUCT_LIST_TAB_NAME);
+        const existingNames = sheet.getLastRow() > 1 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues().flat().map(String) : []; // Map to String
+        
+        if (existingNames.includes(name)) {
+            result.message = `ชื่อ "${name}" มีอยู่แล้วในระบบ`;
+            logActivityToSheet(userEmail, 'Add Product', `User '${username}' failed to add product '${name}': Name already exists`, 'Failed');
+            return result;
+        }
+        
+        sheet.appendRow([name, type]);
+        Logger.log(`Product "${name}" (${type}) added.`);
+        result = { success: true, message: 'เพิ่มรายการสินค้า/บริการสำเร็จ' };
+        logActivityToSheet(userEmail, 'Add Product', `User '${username}' added product '${name}' (${type})`, 'Success');
+        return result;
+    } catch (e) {
+        logErrorToSheet("addProductToSheet", e);
+        result.message = 'เกิดข้อผิดพลาดในการเพิ่มรายการ: ' + e.message;
+        logActivityToSheet(userEmail, 'Add Product', `User '${username}' failed to add product '${productData.name}': ${e.message}`, 'Failed');
+        return result;
+    }
+}
+
+/**
+ * Updates an existing product in the ProductList sheet.
+ * Accessible only by SUPER_USER.
+ * @param {string} originalName - The original name of the product to update.
+ * @param {string} newName - The new name for the product.
+ * @param {string} newType - The new type for the product.
+ * @returns {Object} Success status and message.
+ */
+function updateProductInSheet(originalName, newName, newType) {
+    const userEmail = Session.getActiveUser().getEmail();
+    const username = getLoggedInUsername() || 'Unknown User';
+    let result = { success: false, message: 'เกิดข้อผิดพลาดในการแก้ไขรายการ' };
+
+    try {
+        if (getLoggedInUserRole() !== USER_ROLES.SUPER_USER) {
+            result.message = 'คุณไม่มีสิทธิ์แก้ไขรายการ';
+            logActivityToSheet(userEmail, 'Update Product', `Attempt to update product '${originalName}' without SUPER_USER role`, 'Failed');
+            return result;
+        }
+        
+        // Data Validation
+        const trimmedOriginalName = String(originalName || '').trim();
+        const trimmedNewName = String(newName || '').trim();
+        const trimmedNewType = String(newType || '').trim();
+
+        if (!trimmedNewName) {
+            result.message = 'กรุณากรอกชื่อสินค้า/บริการใหม่';
+            logActivityToSheet(userEmail, 'Update Product', `User '${username}' failed to update product '${trimmedOriginalName}': No new name provided`, 'Failed');
+            return result;
+        }
+        if (!['สินค้า', 'บริการ'].includes(trimmedNewType)) {
+            result.message = 'ประเภทสินค้า/บริการไม่ถูกต้อง ควรเป็น "สินค้า" หรือ "บริการ" เท่านั้น';
+            logActivityToSheet(userEmail, 'Update Product', `User '${username}' failed to update product '${trimmedOriginalName}': Invalid new type '${trimmedNewType}'`, 'Failed');
+            return result;
+        }
+
+        const spreadsheet = safelyOpenSpreadsheetById(PRODUCT_LIST_SHEET_ID, "updateProductInSheet - Product List Spreadsheet"); // Use helper
+        const sheet = getSheetByNameOrThrow(spreadsheet, PRODUCT_LIST_TAB_NAME);
+        const data = sheet.getDataRange().getValues();
+        const nameColIndex = 0; // Column A (0-indexed)
+
+        // Find the row index of the product to update (adjust for header row)
+        // Use map(String) to ensure comparison is always string to string
+        const rowIndex = data.findIndex((row, idx) => idx > 0 && String(row[nameColIndex]).trim() === trimmedOriginalName);
+        
+        if (rowIndex === -1) {
+            result.message = `ไม่พบรายการเดิมที่ชื่อ "${trimmedOriginalName}"`;
+            logActivityToSheet(userEmail, 'Update Product', `User '${username}' failed to find original product '${trimmedOriginalName}' for update`, 'Failed');
+            return result;
+        }
+
+        // Check if the new name already exists and it's not the product being updated itself
+        if (trimmedOriginalName !== trimmedNewName) {
+            // Find if newName exists in any other row (excluding the current one being updated)
+            const nameExists = data.some((row, idx) => 
+                idx > 0 && idx !== rowIndex && String(row[nameColIndex]).trim() === trimmedNewName
+            );
+            if (nameExists) {
+                 result.message = `ชื่อใหม่ "${trimmedNewName}" มีอยู่แล้วในระบบ`;
+                 logActivityToSheet(userEmail, 'Update Product', `User '${username}' failed to update product '${trimmedOriginalName}': New name '${trimmedNewName}' already exists`, 'Failed');
+                 return result;
+            }
+        }
+
+        // Capture changes for log details
+        const oldName = String(data[rowIndex][nameColIndex]).trim();
+        const oldType = String(data[rowIndex][1]).trim();
+        const changes = [];
+        if (oldName !== trimmedNewName) changes.push(`Name: '${oldName}' -> '${trimmedNewName}'`);
+        if (oldType !== trimmedNewType) changes.push(`Type: '${oldType}' -> '${trimmedNewType}'`);
+
+
+        // Update the values directly in the sheet based on the 1-based row index (rowIndex + 1)
+        sheet.getRange(rowIndex + 1, 1).setValue(trimmedNewName); // Update name in Col A
+        sheet.getRange(rowIndex + 1, 2).setValue(trimmedNewType); // Update type in Col B
+
+        Logger.log(`Product "${trimmedOriginalName}" updated to "${trimmedNewName}" (${trimmedNewType}).`);
+        result = { success: true, message: 'แก้ไขรายการสำเร็จ' };
+        logActivityToSheet(userEmail, 'Update Product', `User '${username}' updated product '${trimmedOriginalName}'. Changes: ${changes.join('; ')}`, 'Success');
+        return result;
+    } catch (e) {
+        logErrorToSheet("updateProductInSheet", e);
+        result.message = 'เกิดข้อผิดพลาดในการแก้ไขรายการ: ' + e.message;
+        logActivityToSheet(userEmail, 'Update Product', `User '${username}' failed to update product '${originalName}': ${e.message}`, 'Failed');
+        return result;
+    }
+}
+
+/**
+ * Deletes a product from the ProductList sheet.
+ * Accessible only by SUPER_USER.
+ * @param {string} productName - The name of the product to delete.
+ * @returns {Object} Success status and message.
+ */
+function deleteProductFromSheet(productName) {
+    const userEmail = Session.getActiveUser().getEmail();
+    const username = getLoggedInUsername() || 'Unknown User';
+    let result = { success: false, message: 'เกิดข้อผิดพลาดในการลบรายการ' };
+
+    try {
+        if (getLoggedInUserRole() !== USER_ROLES.SUPER_USER) {
+            result.message = 'คุณไม่มีสิทธิ์ลบรายการ';
+            logActivityToSheet(userEmail, 'Delete Product', `Attempt to delete product '${productName}' without SUPER_USER role`, 'Failed');
+            return result;
+        }
+        
+        const trimmedProductName = String(productName || '').trim();
+
+        const spreadsheet = safelyOpenSpreadsheetById(PRODUCT_LIST_SHEET_ID, "deleteProductFromSheet - Product List Spreadsheet"); // Use helper
+        const sheet = getSheetByNameOrThrow(spreadsheet, PRODUCT_LIST_TAB_NAME);
+        const data = sheet.getDataRange().getValues();
+        const nameColIndex = 0; // Column A (0-indexed)
+
+        // Find the row index of the product to delete (adjust for header row)
+        const rowIndex = data.findIndex((row, idx) => idx > 0 && String(row[nameColIndex]).trim() === trimmedProductName);
+
+        if (rowIndex === -1) {
+            result.message = `ไม่พบรายการที่ชื่อ "${trimmedProductName}"`;
+            logActivityToSheet(userEmail, 'Delete Product', `User '${username}' failed to find product '${trimmedProductName}' for deletion`, 'Failed');
+            return result;
+        }
+
+        sheet.deleteRow(rowIndex + 1); 
+        Logger.log(`Product "${trimmedProductName}" deleted.`);
+        result = { success: true, message: 'ลบรายการสำเร็จ' };
+        logActivityToSheet(userEmail, 'Delete Product', `User '${username}' deleted product '${trimmedProductName}'`, 'Success');
+        return result;
+    } catch (e) {
+        logErrorToSheet("deleteProductFromSheet", e);
+        result.message = 'เกิดข้อผิดพลาดในการลบรายการ: ' + e.message;
+        logActivityToSheet(userEmail, 'Delete Product', `User '${username}' failed to delete product '${productName}': ${e.message}`, 'Failed');
+        return result;
+    }
+}
+
+// --- REPORTING FUNCTIONS ---
+// Note: Viewing reports typically does not require activity logging unless
+// it's a critical audit requirement. Errors during report generation are logged.
+
+/**
+ * Retrieves report data based on customer creation dates.
+ * @param {string} targetSpreadsheetName - The name of the spreadsheet for the report.
+ * @param {'monthly'|'yearly'|'all-time'} timeframe - The time grouping for the report.
+ * @returns {Object} Success status and report data.
+ */
+function getReportData(targetSpreadsheetName, timeframe) {
+    try {
+        if (!getLoggedInUserRole()) {
+            return { success: false, message: 'คุณไม่มีสิทธิ์ในการดูรายงาน', data: [] };
+        }
+
+        if (!hasUserSheetAccess(targetSpreadsheetName)) {
+            return { success: false, message: `คุณไม่มีสิทธิ์ดูรายงานในชีท "${targetSpreadsheetName || 'ที่ไม่ได้เลือก'}"`, data: [] };
+        }
+
+        const config = SPREADSHEET_CONFIGS.find(c => c.name === targetSpreadsheetName);
+        if (!config) {
+            throw new Error(`ไม่พบการตั้งค่าสำหรับชีท: ${targetSpreadsheetName}`);
+        }
+        const spreadsheet = safelyOpenSpreadsheetById(config.id, `getReportData - Report Spreadsheet (${config.name})`); // Use helper
+        const allCustomerData = [];
+
+        // Aggregate data from all customer status tabs
+        Object.values(CUSTOMER_STATUS_TAB_NAMES).forEach(tabName => {
+            try {
+                const sheet = spreadsheet.getSheetByName(tabName);
+                if (sheet && sheet.getLastRow() > 1) {
+                    allCustomerData.push(...sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues());
+                }
+            } catch (e) {
+                logErrorToSheet(`getReportData - Sheet ${tabName} in ${targetSpreadsheetName}`, e);
+                Logger.log(`Error processing sheet "${tabName}" in "${targetSpreadsheetName}": ${e.toString()}`);
+            }
+        });
+
+        if (allCustomerData.length === 0) {
+            return { success: true, message: 'ไม่มีข้อมูลลูกค้าสำหรับสร้างรายงาน', data: [] };
+        }
+
+        const dateCreatedIndex = CUSTOMER_SHEET_HEADERS.indexOf('วันที่สร้าง');
+        if (dateCreatedIndex === -1) {
+            // Suggest running migration if critical column is missing
+            return { success: false, message: 'คอลัมน์ "วันที่สร้าง" ไม่พบ กรุณารันฟังก์ชัน migrateDataStructure() ก่อน', data: [] };
+        }
+
+        const counts = {};
+        const timeZone = spreadsheet.getSpreadsheetTimeZone();
+
+        allCustomerData.forEach(row => {
+            const dateValue = row[dateCreatedIndex];
+            if (dateValue && dateValue instanceof Date) {
+                const date = dateValue;
+                let key;
+                if (timeframe === 'monthly') {
+                    key = Utilities.formatDate(date, timeZone, "yyyy-MM");
+                } else if (timeframe === 'yearly') {
+                    key = date.getFullYear().toString();
+                } else { // 'all-time'
+                    key = 'ตลอดระยะเวลา';
+                }
+                counts[key] = (counts[key] || 0) + 1;
+            }
+        });
+
+        // Sort data by key for chronological order in charts
+        const chartData = Object.keys(counts).sort().map(key => [key, counts[key]]);
+        Logger.log(`Generated growth report for ${targetSpreadsheetName}.`);
+        return { success: true, message: 'ดึงข้อมูลรายงานสำเร็จ', data: chartData };
+
+    } catch (error) {
+        logErrorToSheet("getReportData", error);
+        return { success: false, message: 'เกิดข้อผิดพลาดในการดึงข้อมูลรายงาน: ' + error.message };
+    }
+}
+
+/**
+ * Retrieves customer status breakdown report data (counts per status tab).
+ * @param {string} targetSpreadsheetName - The name of the spreadsheet for the report.
+ * @returns {Object} Success status and report data.
+ */
+function getCustomerStatusReportData(targetSpreadsheetName) {
+    try {
+        if (!getLoggedInUserRole()) {
+            return { success: false, message: 'คุณไม่มีสิทธิ์ในการดูรายงาน', data: [] };
+        }
+
+        if (!hasUserSheetAccess(targetSpreadsheetName)) {
+            return { success: false, message: `คุณไม่มีสิทธิ์ดูรายงานในชีท "${targetSpreadsheetName || 'ที่ไม่ได้เลือก'}"`, data: [] };
+        }
+
+        const config = SPREADSHEET_CONFIGS.find(c => c.name === targetSpreadsheetName);
+        if (!config) {
+            throw new Error(`ไม่พบการตั้งค่าสำหรับชีท: ${targetSpreadsheetName}`);
+        }
+        const spreadsheet = safelyOpenSpreadsheetById(config.id, `getCustomerStatusReportData - Report Spreadsheet (${config.name})`); // Use helper
+
+        const statusCounts = [];
+
+        Object.values(CUSTOMER_STATUS_TAB_NAMES).forEach(tabName => {
+            try {
+                const sheet = spreadsheet.getSheetByName(tabName);
+                let count = 0;
+                if (sheet && sheet.getLastRow() > 1) { // Subtract header row
+                    count = sheet.getLastRow() - 1;
+                }
+                statusCounts.push([tabName, count]);
+            } catch (e) {
+                logErrorToSheet(`getCustomerStatusReportData - Sheet ${tabName} in ${targetSpreadsheetName}`, e);
+                Logger.log(`Error processing sheet "${tabName}" in "${targetSpreadsheetName}": ${e.toString()}`);
+            }
+        });
+
+        if (statusCounts.every(item => item[1] === 0)) {
+            return { success: true, message: 'ไม่มีข้อมูลลูกค้าสำหรับสร้างรายงานสถานะ', data: [] };
+        }
+
+        Logger.log(`Generated customer status report for ${targetSpreadsheetName}.`);
+        return { success: true, message: 'ดึงข้อมูลรายงานสถานะสำเร็จ', data: statusCounts };
+
+    } catch (error) {
+        logErrorToSheet("getCustomerStatusReportData", error);
+        return { success: false, message: 'เกิดข้อผิดพลาดในการดึงข้อมูลรายงานสถานะ: ' + error.message };
+    }
+}
+
+/**
+ * Retrieves contact performance report data, including contact frequency and inactive customers.
+ * @param {string} targetSpreadsheetName - The name of the spreadsheet for the report.
+ * @returns {Object} Success status and report data (contactFrequency and inactiveCustomers).
+ */
+function getContactPerformanceReport(targetSpreadsheetName) {
+    try {
+        if (!getLoggedInUserRole()) {
+            return { success: false, message: 'คุณไม่มีสิทธิ์ในการดูรายงาน' };
+        }
+
+        if (!hasUserSheetAccess(targetSpreadsheetName)) {
+            return { success: false, message: `คุณไม่มีสิทธิ์ดูรายงานในชีท "${targetSpreadsheetName || 'ที่ไม่ได้เลือก'}"`, data: [] };
+        }
+
+        const config = SPREADSHEET_CONFIGS.find(c => c.name === targetSpreadsheetName);
+        if (!config) {
+            throw new Error(`ไม่พบการตั้งค่าสำหรับชีท: ${targetSpreadsheetName}`);
+        }
+        const spreadsheet = safelyOpenSpreadsheetById(config.id, `getContactPerformanceReport - Report Spreadsheet (${config.name})`); // Use helper
+
+        const allCustomerData = [];
+
+        // Aggregate data from all customer status tabs
+        Object.values(CUSTOMER_STATUS_TAB_NAMES).forEach(tabName => {
+            try {
+                const sheet = spreadsheet.getSheetByName(tabName);
+                if (sheet && sheet.getLastRow() > 1) {
+                    allCustomerData.push(...sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues());
+                }
+            } catch (e) {
+                logErrorToSheet(`getContactPerformanceReport - Sheet ${tabName} in ${targetSpreadsheetName}`, e);
+                Logger.log(`Error processing sheet "${tabName}" in "${targetSpreadsheetName}": ${e.toString()}`);
+            }
+        });
+
+        if (allCustomerData.length === 0) {
+            return { success: true, message: 'ไม่มีข้อมูลสำหรับรายงาน', data: { contactFrequency: [], inactiveCustomers: [] } };
+        }
+
+        const headers = CUSTOMER_SHEET_HEADERS;
+        const companyNameIndex = headers.indexOf('ชื่อบริษัท');
+        const lastModifiedIndex = headers.indexOf('วันที่แก้ไขล่าสุด');
+        const contactCountIndex = headers.indexOf('จำนวนการติดต่อ');
+        const statusIndex = headers.indexOf('สถานะ');
+
+        if ([companyNameIndex, lastModifiedIndex, contactCountIndex, statusIndex].some(idx => idx === -1)) {
+            throw new Error('ไม่พบคอลัมน์ที่จำเป็น (ชื่อบริษัท, วันที่แก้ไขล่าสุด, จำนวนการติดต่อ, สถานะ) สำหรับรายงานประสิทธิภาพการติดต่อ');
+        }
+
+        const inactiveCustomers = [];
+        const now = new Date();
+        const contactFrequency = [];
+        const timeZone = spreadsheet.getSpreadsheetTimeZone();
+
+
+        allCustomerData.forEach(row => {
+            const companyName = row[companyNameIndex];
+            const lastModified = row[lastModifiedIndex] instanceof Date ? row[lastModifiedIndex] : new Date(row[lastModifiedIndex]); // Ensure it's a Date object
+            const count = row[contactCountIndex] || 0;
+            const status = row[statusIndex];
+
+            // Contact Frequency Data
+            if (count > 0) {
+                contactFrequency.push({ name: companyName, count: Number(count), status: status });
+            }
+
+            // Inactive Customers Data
+            if (!isNaN(lastModified.getTime())) { // Check for valid date
+                const diffTime = Math.abs(now.getTime() - lastModified.getTime());
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); // Days difference
+                inactiveCustomers.push({
+                    companyName: companyName,
+                    lastContact: Utilities.formatDate(lastModified, timeZone, "yyyy-MM-dd"), // Use timeZone
+                    daysInactive: diffDays,
+                    status: status
+                });
+            }
+        });
+
+        // Sort contact frequency by count descending
+        const contactFrequencyData = contactFrequency.sort((a, b) => b.count - a.count);
+        // Sort inactive customers by days inactive descending
+        const inactiveCustomersData = inactiveCustomers.sort((a, b) => b.daysInactive - a.daysInactive);
+
+        Logger.log(`Generated contact performance report for ${targetSpreadsheetName}.`);
+        return {
+            success: true,
+            data: {
+                contactFrequency: contactFrequencyData,
+                inactiveCustomers: inactiveCustomersData
+            }
+        };
+
+    } catch (error) {
+        logErrorToSheet("getContactPerformanceReport", error);
+        return { success: false, message: 'เกิดข้อผิดพลาดในการสร้างรายงานประสิทธิภาพ: ' + error.message };
+    }
+}
+
+/**
+ * Cleans a product name string by removing common suffixes like (model), (quantity), etc.
+ * This is used for consistent aggregation of product names.
+ * @param {string} productName - The raw product name string.
+ * @returns {string} The cleaned product name.
+ */
+function cleanProductName(productName) {
+    try {
+        let cleaned = String(productName); // Ensure it's a string
+        // Remove content in parentheses, e.g., "(model)"
+        cleaned = cleaned.replace(/\s*\(.*?\)/g, '');
+        // Remove quantity like " x 5" or " 5 ตัว"
+        cleaned = cleaned.replace(/\s*x\s*\d+/g, ''); // " x5"
+        cleaned = cleaned.replace(/\s*\d+\s*ตัว/g, ''); // " 5 ตัว"
+        // Remove trailing numbers that might be quantities or IDs
+        cleaned = cleaned.replace(/\s+\d+$/, '');
+        // Remove trailing commas and spaces
+        cleaned = cleaned.replace(/,\s*$/, '');
+        return cleaned.trim();
+    } catch (e) {
+        logErrorToSheet("cleanProductName", e);
+        return String(productName); // Return original if error
+    }
+}
+
+/**
+ * Retrieves product usage report data, including popular products and product proportions.
+ * @param {string} targetSpreadsheetName - The name of the spreadsheet for the report.
+ * @returns {Object} Success status and report data (popularProducts and productProportions).
+ */
+function getProductUsageReport(targetSpreadsheetName) {
+    try {
+        if (!getLoggedInUserRole()) {
+            return { success: false, message: 'คุณไม่มีสิทธิ์ในการดูรายงาน' };
+        }
+
+        if (!hasUserSheetAccess(targetSpreadsheetName)) {
+            return { success: false, message: `คุณไม่มีสิทธิ์ดูรายงานในชีท "${targetSpreadsheetName || 'ที่ไม่ได้เลือก'}"`, data: [] };
+        }
+
+        const config = SPREADSHEET_CONFIGS.find(c => c.name === targetSpreadsheetName);
+        if (!config) {
+            throw new Error(`ไม่พบการตั้งค่าสำหรับชีท: ${targetSpreadsheetName}`);
+        }
+        const spreadsheet = safelyOpenSpreadsheetById(config.id, `getProductUsageReport - Report Spreadsheet (${config.name})`); // Use helper
+
+        const allCustomerData = [];
+
+        // Aggregate data from all customer status tabs
+        Object.values(CUSTOMER_STATUS_TAB_NAMES).forEach(tabName => {
+            try {
+                const sheet = spreadsheet.getSheetByName(tabName);
+                if (sheet && sheet.getLastRow() > 1) {
+                    allCustomerData.push(...sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues());
+                }
+            } catch (e) {
+                logErrorToSheet(`getProductUsageReport - Sheet ${tabName} in ${targetSpreadsheetName}`, e);
+                Logger.log(`Error processing sheet "${tabName}" in "${targetSpreadsheetName}": ${e.toString()}`);
+            }
+        });
+
+        if (allCustomerData.length === 0) {
+            return { success: true, message: 'ไม่มีข้อมูลสำหรับรายงาน', data: { popularProducts: [], productProportions: [] } };
+        }
+
+        const headers = CUSTOMER_SHEET_HEADERS;
+        const usedProductIndex = headers.indexOf('สินค้าที่ใช้');
+
+        if (usedProductIndex === -1) {
+            throw new Error('ไม่พบคอลัมน์ที่จำเป็น (สินค้าที่ใช้) สำหรับรายงานการใช้สินค้า/บริการ');
+        }
+
+        const productUsageCounts = {}; // Counts occurrences of each product string
+        const customerProductAssociations = {}; // Counts unique customers associated with each product
+
+        allCustomerData.forEach(row => {
+            const productsUsedRaw = (row[usedProductIndex] || '').toString();
+            let productsUsed = [];
+
+            try {
+                const parsedProducts = JSON.parse(productsUsedRaw);
+                if (Array.isArray(parsedProducts)) {
+                    // If stored as JSON array of objects, extract product names
+                    productsUsed = parsedProducts.map(item => String(item.product || '').trim()).filter(p => p !== '');
+                } else {
+                    // Fallback for old/malformed string data
+                    productsUsed = productsUsedRaw.split(',').map(item => cleanProductName(item)).filter(item => item !== '');
+                }
+            } catch (e) {
+                // If parsing fails, treat as comma-separated string
+                productsUsed = productsUsedRaw.split(',').map(item => cleanProductName(item)).filter(item => item !== '');
+            }
+
+            // Count total usage of each product
+            productsUsed.forEach(product => {
+                productUsageCounts[product] = (productUsageCounts[product] || 0) + 1;
+            });
+
+            // Count unique customers per product
+            const uniqueProductsForCustomer = new Set(productsUsed);
+            uniqueProductsForCustomer.forEach(product => {
+                if (product !== '') { // Ensure product name is not empty
+                    customerProductAssociations[product] = (customerProductAssociations[product] || 0) + 1;
+                }
+            });
+        });
+
+        // Convert counts to array of objects for easier sorting/charting
+        const popularProductsData = Object.keys(productUsageCounts).map(name => ({
+            name: name,
+            count: productUsageCounts[name]
+        })).sort((a, b) => b.count - a.count); // Sort by count descending
+
+        const productProportionsData = Object.keys(customerProductAssociations).map(name => ({
+            name: name,
+            count: customerProductAssociations[name]
+        })).sort((a, b) => b.name.localeCompare(a.name, 'th')); // Sort alphabetically by name (Thai locale)
+
+        Logger.log(`Generated product usage report for ${targetSpreadsheetName}.`);
+        return {
+            success: true,
+            data: {
+                popularProducts: popularProductsData,
+                productProportions: productProportionsData
+            }
+        };
+
+    } catch (error) {
+        logErrorToSheet("getProductUsageReport", error);
+        return { success: false, message: 'เกิดข้อผิดพลาดในการสร้างรายงานสินค้า/บริการ: ' + error.message };
+    }
+}
+
+/**
+ * Retrieves all activity logs from the Activity Logs sheet.
+ * Accessible only by SUPER_USER.
+ * @returns {Object} Success status and array of activity log data (including headers).
+ */
+function getActivityLogs() {
+    try {
+        if (getLoggedInUserRole() !== USER_ROLES.SUPER_USER) {
+            return { success: false, message: 'คุณไม่มีสิทธิ์ในการดูบันทึกกิจกรรม', data: [] };
+        }
+        const spreadsheet = safelyOpenSpreadsheetById(SYSTEM_SHEET_ID, "getActivityLogs - System Spreadsheet"); // Use helper
+        const sheet = getSheetByNameOrThrow(spreadsheet, ACTIVITY_LOG_TAB_NAME);
+
+        // Get all data, including headers
+        const rawData = sheet.getDataRange().getValues(); // ใช้ rawData แทน data เพื่อป้องกันการทับตัวแปร
+
+        // === เพิ่ม Logger.log() ตรงนี้ (สำหรับการ Debugging) ===
+        Logger.log("--- Debugging getActivityLogs (Backend) ---");
+        Logger.log("Raw data from sheet (JSON): " + JSON.stringify(rawData));
+        Logger.log("Data length: " + rawData.length);
+        Logger.log("Headers from sheet (first row): " + JSON.stringify(rawData.length > 0 ? rawData[0] : "No headers found"));
+        // ===============================================
+
+        if (rawData.length < 1) { // If sheet is completely empty
+            Logger.log("getActivityLogs: Sheet is completely empty.");
+            return { success: true, message: 'ไม่พบบันทึกกิจกรรม', data: [] }; // Return empty data if no headers
+        }
+        
+        // Ensure headers are consistent, if not, it means the sheet structure is wrong
+        // This check should use the actual data[0] from the sheet
+        if (JSON.stringify(rawData[0]) !== JSON.stringify(ACTIVITY_LOG_HEADERS)) {
+            Logger.log("getActivityLogs: Sheet headers do not match expected ACTIVITY_LOG_HEADERS.");
+            Logger.log("Actual headers: " + JSON.stringify(rawData[0]));
+            Logger.log("Expected headers: " + JSON.stringify(ACTIVITY_LOG_HEADERS));
+            return { success: false, message: 'โครงสร้างชีทบันทึกกิจกรรมไม่ถูกต้อง กรุณาติดต่อผู้ดูแล', data: [] };
+        }
+
+        // If only headers present, and no actual data rows
+        if (rawData.length === 1 && JSON.stringify(rawData[0]) === JSON.stringify(ACTIVITY_LOG_HEADERS)) {
+             Logger.log("getActivityLogs: Only headers present, no activity logs yet.");
+             return { success: true, message: 'ไม่พบบันทึกกิจกรรม', data: [ACTIVITY_LOG_HEADERS] };
+        }
+
+        // --- NEW: Convert all data to String explicitly before sending to Frontend ---
+        const timeZone = spreadsheet.getSpreadsheetTimeZone();
+        const formattedData = rawData.map((row, rowIndex) => {
+            if (rowIndex === 0) return row; // Keep headers as is
+            return row.map((cellValue, colIndex) => {
+                if (colIndex === 0 && cellValue instanceof Date) { // Assuming Timestamp is the first column
+                    return Utilities.formatDate(cellValue, timeZone, "yyyy-MM-dd HH:mm:ss");
+                }
+                // Check if cellValue is an object (like a Date object that wasn't caught by instanceof Date)
+                if (typeof cellValue === 'object' && cellValue !== null) {
+                    try {
+                        return JSON.stringify(cellValue); // Convert objects to JSON string
+                    } catch (e) {
+                        return String(cellValue); // Fallback to simple String() if JSON.stringify fails
+                    }
+                }
+                return String(cellValue); // Convert all other cell values to String
+            });
+        });
+        // --- END NEW ---
+
+        Logger.log(`getActivityLogs: Successfully fetched ${formattedData.length - 1} activity logs.`);
+        // Return formattedData instead of rawData
+        return { success: true, data: formattedData }; 
+
+    } catch (e) {
+        logErrorToSheet("getActivityLogs", e); // Log the error
+        return { success: false, message: 'เกิดข้อผิดพลาดในการดึงบันทึกกิจกรรม: ' + e.message, data: [] };
+    }
+}
+/**
+ * สำรองข้อมูลเฉพาะบาง Tab ไปยัง Spreadsheet ไฟล์เดียวที่กำหนดไว้
+ */
+function backupSpecificTabsToSingleFile() {
+  const BACKUP_FILE_ID = 'YOUR_SINGLE_BACKUP_SPREADSHEET_ID_HERE'; // *** ID ของ Spreadsheet ไฟล์เดียวสำหรับเก็บ Tab สำรองทั้งหมด ***
+  const SOURCE_SPREADSHEET_ID = SPREADSHEET_CONFIGS[0].id; // สมมติว่าต้องการสำรอง Tab จาก CRMSYB หลัก
+  const TABS_TO_BACKUP = ['ลูกค้า Key', 'ลูกค้าเกรด A', 'ProductList']; // *** ระบุชื่อ Tab ที่ต้องการสำรอง ***
+
+  try {
+    const backupSpreadsheet = SpreadsheetApp.openById(BACKUP_FILE_ID);
+    const sourceSpreadsheet = SpreadsheetApp.openById(SOURCE_SPREADSHEET_ID);
+    const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd_HH-mm-ss");
+
+    TABS_TO_BACKUP.forEach(tabName => {
+      const sourceSheet = sourceSpreadsheet.getSheetByName(tabName);
+      if (sourceSheet) {
+        const newSheetName = `${tabName}_Backup_${timestamp}`;
+        sourceSheet.copyTo(backupSpreadsheet).setName(newSheetName);
+        Logger.log(`Backed up tab "${tabName}" from "${sourceSpreadsheet.getName()}" to "${newSheetName}" in "${backupSpreadsheet.getName()}"`);
+      } else {
+        Logger.log(`Warning: Tab "${tabName}" not found in source spreadsheet "${sourceSpreadsheet.getName()}", skipping.`);
+      }
+    });
+
+    Logger.log("Specific tabs backed up successfully to single file.");
+    return { success: true, message: "สำรองข้อมูลบางส่วนสำเร็จ" };
+
+  } catch (e) {
+    Logger.log("Error during specific tabs backup: " + e.toString());
+    logErrorToSheet("backupSpecificTabsToSingleFile", e);
+    return { success: false, message: "เกิดข้อผิดพลาดในการสำรองข้อมูลบางส่วน: " + e.message };
+  }
+}
+// --- DASHBOARD FUNCTIONS (REVISED) ---
+
+// --- DASHBOARD FUNCTIONS (REVISED) ---
+
+// --- DASHBOARD FUNCTIONS (REVISED FOR CLEAN COMMENT) ---
+
+function getDashboardData() {
+  try {
+    if (!getLoggedInUserRole()) {
+      return { success: false, message: 'ผู้ใช้ไม่ได้ล็อกอิน' };
+    }
+
+    const userAllowedSheets = getLoggedInUserAllowedSheets();
+    const allCustomerData = [];
+    const now = new Date();
+    const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_CONFIGS[0].id);
+    const timeZone = spreadsheet.getSpreadsheetTimeZone();
+
+    // 1. รวบรวมข้อมูลลูกค้าทั้งหมด
+    userAllowedSheets.forEach(sheetName => {
+      const config = SPREADSHEET_CONFIGS.find(c => c.name === sheetName);
+      if (!config) return;
+      const ss = SpreadsheetApp.openById(config.id);
+      Object.values(CUSTOMER_STATUS_TAB_NAMES).forEach(tabName => {
+        const sheet = ss.getSheetByName(tabName);
+        if (sheet && sheet.getLastRow() > 1) {
+          allCustomerData.push(...sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues());
+        }
+      });
+    });
+
+    // 2. เตรียมข้อมูลสำหรับคำนวณ
+    const dateCreatedIndex = CUSTOMER_SHEET_HEADERS.indexOf('วันที่สร้าง');
+    const lastModifiedIndex = CUSTOMER_SHEET_HEADERS.indexOf('วันที่แก้ไขล่าสุด');
+    const companyNameIndex = CUSTOMER_SHEET_HEADERS.indexOf('ชื่อบริษัท');
+    const statusIndex = CUSTOMER_SHEET_HEADERS.indexOf('สถานะ');
+    const commentIndex = CUSTOMER_SHEET_HEADERS.indexOf('คอมเม้น');
+
+    // 3. คำนวณค่า KPI
+    const totalCustomers = allCustomerData.length;
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const newCustomersThisMonth = allCustomerData.filter(row => row[dateCreatedIndex] && new Date(row[dateCreatedIndex]) >= startOfMonth).length;
+    const ninetyDaysAgo = new Date();
+    ninetyDaysAgo.setDate(now.getDate() - 90);
+    const followUpCustomers = allCustomerData.filter(row => row[lastModifiedIndex] && new Date(row[lastModifiedIndex]) < ninetyDaysAgo);
+
+    // 4. เตรียมข้อมูลสำหรับกราฟ
+    const statusCounts = allCustomerData.reduce((acc, row) => {
+      const status = row[statusIndex] || 'ไม่ระบุ';
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {});
+    const statusChartData = { labels: Object.keys(statusCounts), data: Object.values(statusCounts) };
+    
+    const growthCounts = {};
+    for (let i = 5; i >= 0; i--) {
+        const month = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const key = Utilities.formatDate(month, timeZone, "yyyy-MM");
+        growthCounts[key] = 0;
+    }
+    allCustomerData.forEach(row => {
+        const dateValue = row[dateCreatedIndex];
+        if (dateValue) {
+            const date = new Date(dateValue);
+            const key = Utilities.formatDate(date, timeZone, "yyyy-MM");
+            if (growthCounts.hasOwnProperty(key)) {
+                growthCounts[key]++;
+            }
+        }
+    });
+    const growthChartData = { labels: Object.keys(growthCounts), data: Object.values(growthCounts) };
+
+    // 5. เตรียมข้อมูลสำหรับลิสต์
+    const followUpList = followUpCustomers.slice(0, 5).map(row => ({
+      name: row[companyNameIndex],
+      days: Math.round((new Date() - new Date(row[lastModifiedIndex])) / (1000 * 60 * 60 * 24))
+    }));
+    
+    // *** FIX: Get and Clean the comment for Latest Customers list ***
+    const latestCustomers = allCustomerData
+      .filter(row => row[dateCreatedIndex])
+      .sort((a, b) => new Date(b[dateCreatedIndex]) - new Date(a[dateCreatedIndex]))
+      .slice(0, 5)
+      .map(row => {
+        let latestCommentText = (row[commentIndex] || '').split('\n')[0];
+        // Check if the comment has the timestamp prefix and split it
+        if (latestCommentText.includes(']: ')) {
+          latestCommentText = latestCommentText.split(']: ')[1] || '';
+        }
+        return {
+          name: row[companyNameIndex],
+          date: Utilities.formatDate(new Date(row[dateCreatedIndex]), timeZone, "yyyy-MM-dd"),
+          comment: latestCommentText
+        };
+      });
+
+    // 6. ส่งข้อมูลทั้งหมดกลับไป
+    return {
+      success: true,
+      data: {
+        kpis: {
+          totalCustomers: totalCustomers,
+          newCustomersThisMonth: newCustomersThisMonth,
+          activitiesThisWeek: 0, 
+          followUpCount: followUpCustomers.length
+        },
+        charts: {
+          status: statusChartData,
+          growth: growthChartData
+        },
+        lists: {
+          followUps: followUpList,
+          latestCustomers: latestCustomers
+        }
+      }
+    };
+  } catch (e) {
+    logErrorToSheet("getDashboardData", e);
+    return { success: false, message: e.message };
+  }
+}
+
+// ===============================================
+//   ส่วนสำหรับทดสอบ (TESTING ZONE)
+// ===============================================
+
+/**
+ * ฟังก์ชันแม่สำหรับรันเทสทั้งหมด
+ * ให้เลือกฟังก์ชันนี้จากใน Editor แล้วกด Run เพื่อทดสอบทุกอย่าง
+ */
+function runAllTests() {
+  Logger.log("===== STARTING ALL SYSTEM TESTS =====");
+  
+  testLoginFunction();
+  testUserManagement();
+  testCustomerCRUD();
+  
+  Logger.log("===== ALL TESTS COMPLETED =====");
+}
+
+
+/**
+ * ฟังก์ชันสำหรับทดสอบการ Login
+ */
+function testLoginFunction() {
+  Logger.log("--- เริ่มการทดสอบฟังก์ชัน Login ---");
+
+  // กรณีที่ 1: ทดสอบ Login ด้วยรหัสผ่านที่ถูกต้อง
+  // *** สำคัญ: แก้ไข 'admin' และ 'adminpass' ให้เป็น user/pass สำหรับทดสอบของคุณ ***
+  var correctLogin = doLogin('admin', 'syb0255'); 
+  if (correctLogin.success === true) {
+    Logger.log("✅ ผ่าน: การทดสอบ Login สำเร็จ");
+  } else {
+    Logger.log("❌ ไม่ผ่าน: การทดสอบ Login สำเร็จล้มเหลวเพราะ: " + correctLogin.message);
+  }
+
+  // กรณีที่ 2: ทดสอบ Login ด้วยรหัสผ่านที่ผิด
+  var wrongLogin = doLogin('admin', 'wrong_password_1234');
+  if (wrongLogin.success === false) {
+    Logger.log("✅ ผ่าน: การทดสอบ Login ล้มเหลว (ซึ่งเป็นผลที่ถูกต้อง)");
+  } else {
+    Logger.log("❌ ไม่ผ่าน: การทดสอบ Login ล้มเหลวควรจะไม่สำเร็จ แต่กลับสำเร็จ");
+  }
+  
+  Logger.log("--- จบการทดสอบฟังก์ชัน Login ---");
+}
+
+/**
+ * ฟังก์ชันสำหรับทดสอบการจัดการผู้ใช้ (เพิ่ม, ลบ)
+ */
+function testUserManagement() {
+  Logger.log("--- เริ่มการทดสอบ การจัดการผู้ใช้ ---");
+  const testUsername = "testuser_" + new Date().getTime(); // สร้างชื่อ user ชั่วคราวที่ไม่ซ้ำ
+  const testPassword = "testpassword";
+  const testRole = USER_ROLES.NORMAL_USER;
+  const testSheets = [SPREADSHEET_CONFIGS[0].name];
+
+  // 1. ทดสอบการเพิ่ม User
+  const addUserResult = addUser({ username: testUsername, password: testPassword, role: testRole, allowedSheets: testSheets });
+  if (addUserResult.success === true) {
+    Logger.log("✅ ผ่าน: การเพิ่มผู้ใช้ทดสอบ");
+    
+    // 2. ทดสอบการลบ User ที่เพิ่งเพิ่มเข้าไป
+    const deleteUserResult = deleteUser(testUsername);
+    if (deleteUserResult.success === true) {
+      Logger.log("✅ ผ่าน: การลบผู้ใช้ทดสอบ");
+    } else {
+      Logger.log("❌ ไม่ผ่าน: การลบผู้ใช้ทดสอบล้มเหลว: " + deleteUserResult.message);
+    }
+  } else {
+    Logger.log("❌ ไม่ผ่าน: การเพิ่มผู้ใช้ทดสอบล้มเหลว: " + addUserResult.message);
+  }
+  Logger.log("--- จบการทดสอบ การจัดการผู้ใช้ ---");
+}
+
+/**
+ * ฟังก์ชันสำหรับทดสอบการจัดการข้อมูลลูกค้า (เพิ่ม, แก้ไข, ลบ)
+ */
+function testCustomerCRUD() {
+  Logger.log("--- เริ่มการทดสอบ การจัดการข้อมูลลูกค้า (CRUD) ---");
+  const testSheetName = SPREADSHEET_CONFIGS[0].name; // เลือกชีทที่จะใช้ทดสอบ
+  const testStatus = "ลูกค้าใหม่";
+  const testCompanyName = "บริษัททดสอบระบบ " + new Date().getTime();
+  let testCustomerId = null;
+
+  // 1. ทดสอบการสร้างข้อมูลลูกค้า (Create)
+  const customerData = {
+    targetSpreadsheetName: testSheetName,
+    status: testStatus,
+    companyName: testCompanyName,
+    address: "123 ถนนทดสอบ",
+    comment: "ข้อมูลนี้ใช้สำหรับทดสอบ"
+  };
+  const addResult = doPost(customerData);
+
+  if (addResult.success === true) {
+    Logger.log("✅ ผ่าน: การสร้างข้อมูลลูกค้าทดสอบ");
+
+    // 2. ทดสอบการอ่านและค้นหาข้อมูล (Read)
+    const allNewCustomers = getCustomerData(testSheetName, [testStatus]);
+    const addedCustomerRow = allNewCustomers.data.find(row => row[1] === testCompanyName); // ค้นหาจากชื่อบริษัท
+    
+    if (addedCustomerRow) {
+      Logger.log("✅ ผ่าน: การอ่านข้อมูลลูกค้าทดสอบ");
+      testCustomerId = addedCustomerRow[0]; // เก็บ ID ไว้ใช้ทดสอบ Update/Delete
+
+      // 3. ทดสอบการแก้ไขข้อมูล (Update)
+      const fieldsToUpdate = { address: "456 ถนนอัปเดต" };
+      const updateResult = updateCustomerData({
+        targetSpreadsheetName: testSheetName,
+        originalRow: addedCustomerRow,
+        updatedFields: fieldsToUpdate
+      });
+
+      if (updateResult.success === true) {
+        Logger.log("✅ ผ่าน: การแก้ไขข้อมูลลูกค้าทดสอบ");
+
+        // 4. ทดสอบการลบข้อมูล (Delete)
+        const deleteResult = deleteCustomerData({
+          targetSpreadsheetName: testSheetName,
+          originalRow: addedCustomerRow
+        });
+        if (deleteResult.success === true) {
+          Logger.log("✅ ผ่าน: การลบข้อมูลลูกค้าทดสอบ");
+        } else {
+          Logger.log("❌ ไม่ผ่าน: การลบข้อมูลลูกค้าทดสอบล้มเหลว: " + deleteResult.message);
+        }
+      } else {
+        Logger.log("❌ ไม่ผ่าน: การแก้ไขข้อมูลลูกค้าทดสอบล้มเหลว: " + updateResult.message);
+      }
+    } else {
+      Logger.log("❌ ไม่ผ่าน: การอ่านข้อมูลลูกค้าทดสอบ (ไม่พบข้อมูลที่เพิ่งสร้าง)");
+    }
+  } else {
+    Logger.log("❌ ไม่ผ่าน: การสร้างข้อมูลลูกค้าทดสอบล้มเหลว: " + addResult.message);
+  }
+  Logger.log("--- จบการทดสอบ การจัดการข้อมูลลูกค้า ---");
+}
+
+// --- DASHBOARD FUNCTIONS (REVISED) ---
+
+function getDashboardData() {
+  try {
+    if (!getLoggedInUserRole()) {
+      return { success: false, message: 'ผู้ใช้ไม่ได้ล็อกอิน' };
+    }
+
+    const userAllowedSheets = getLoggedInUserAllowedSheets();
+    const allCustomerData = [];
+    const now = new Date();
+    const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_CONFIGS[0].id);
+    const timeZone = spreadsheet.getSpreadsheetTimeZone();
+
+    // 1. รวบรวมข้อมูลลูกค้าทั้งหมด
+    userAllowedSheets.forEach(sheetName => {
+      const config = SPREADSHEET_CONFIGS.find(c => c.name === sheetName);
+      if (!config) return;
+      const ss = SpreadsheetApp.openById(config.id);
+      Object.values(CUSTOMER_STATUS_TAB_NAMES).forEach(tabName => {
+        const sheet = ss.getSheetByName(tabName);
+        if (sheet && sheet.getLastRow() > 1) {
+          allCustomerData.push(...sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues());
+        }
+      });
+    });
+
+    // 2. เตรียมข้อมูลสำหรับคำนวณ
+    const dateCreatedIndex = CUSTOMER_SHEET_HEADERS.indexOf('วันที่สร้าง');
+    const lastModifiedIndex = CUSTOMER_SHEET_HEADERS.indexOf('วันที่แก้ไขล่าสุด');
+    const companyNameIndex = CUSTOMER_SHEET_HEADERS.indexOf('ชื่อบริษัท');
+    const statusIndex = CUSTOMER_SHEET_HEADERS.indexOf('สถานะ');
+    const commentIndex = CUSTOMER_SHEET_HEADERS.indexOf('คอมเม้น');
+
+    // 3. คำนวณค่า KPI
+    const totalCustomers = allCustomerData.length;
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const newCustomersThisMonth = allCustomerData.filter(row => row[dateCreatedIndex] && new Date(row[dateCreatedIndex]) >= startOfMonth).length;
+    const ninetyDaysAgo = new Date();
+    ninetyDaysAgo.setDate(now.getDate() - 90);
+    const followUpCustomers = allCustomerData.filter(row => row[lastModifiedIndex] && new Date(row[lastModifiedIndex]) < ninetyDaysAgo);
+
+    // 4. เตรียมข้อมูลสำหรับกราฟ
+    const statusCounts = allCustomerData.reduce((acc, row) => {
+      const status = row[statusIndex] || 'ไม่ระบุ';
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {});
+    const statusChartData = { labels: Object.keys(statusCounts), data: Object.values(statusCounts) };
+    
+    const growthCounts = {};
+    for (let i = 5; i >= 0; i--) {
+        const month = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const key = Utilities.formatDate(month, timeZone, "yyyy-MM");
+        growthCounts[key] = 0;
+    }
+    allCustomerData.forEach(row => {
+        const dateValue = row[dateCreatedIndex];
+        if (dateValue) {
+            const date = new Date(dateValue);
+            const key = Utilities.formatDate(date, timeZone, "yyyy-MM");
+            if (growthCounts.hasOwnProperty(key)) {
+                growthCounts[key]++;
+            }
+        }
+    });
+    const growthChartData = { labels: Object.keys(growthCounts), data: Object.values(growthCounts) };
+
+    // 5. เตรียมข้อมูลสำหรับลิสต์
+    const followUpList = followUpCustomers.slice(0, 5).map(row => ({
+      name: row[companyNameIndex],
+      days: Math.round((new Date() - new Date(row[lastModifiedIndex])) / (1000 * 60 * 60 * 24))
+    }));
+    
+    // *** FIX: Get and Clean the comment for Latest Customers list ***
+    const latestCustomers = allCustomerData
+      .filter(row => row[dateCreatedIndex])
+      .sort((a, b) => new Date(b[dateCreatedIndex]) - new Date(a[dateCreatedIndex]))
+      .slice(0, 5)
+      .map(row => {
+        let latestCommentText = (row[commentIndex] || '').split('\n')[0];
+        // Check if the comment has the timestamp prefix and split it
+        if (latestCommentText.includes(']: ')) {
+          latestCommentText = latestCommentText.split(']: ')[1] || '';
+        }
+        return {
+          name: row[companyNameIndex],
+          date: Utilities.formatDate(new Date(row[dateCreatedIndex]), timeZone, "yyyy-MM-dd"),
+          comment: latestCommentText
+        };
+      });
+
+    // 6. ส่งข้อมูลทั้งหมดกลับไป
+    return {
+      success: true,
+      data: {
+        kpis: {
+          totalCustomers: totalCustomers,
+          newCustomersThisMonth: newCustomersThisMonth,
+          activitiesThisWeek: 0, 
+          followUpCount: followUpCustomers.length
+        },
+        charts: {
+          status: statusChartData,
+          growth: growthChartData
+        },
+        lists: {
+          followUps: followUpList,
+          latestCustomers: latestCustomers
+        }
+      }
+    };
+  } catch (e) {
+    logErrorToSheet("getDashboardData", e);
+    return { success: false, message: e.message };
+  }
+}
+// --- NEW FUNCTION FOR FILE ATTACHMENTS ---
+
+function uploadFileAndLinkToCustomer(fileData, customerId, customerName) {
+  try {
+    // *** สำคัญ: ใส่ ID ของโฟลเดอร์ใน Google Drive ที่จะใช้เก็บไฟล์ตรงนี้ ***
+    const FOLDER_ID = "17Ldw82BsXOZvx1m7sDrHHecysLqzXX_r"; 
+    const folder = DriveApp.getFolderById(FOLDER_ID);
+    
+    // Decode Base64 string from frontend
+    const decoded = Utilities.base64Decode(fileData.base64, Utilities.Charset.UTF_8);
+    const blob = Utilities.newBlob(decoded, fileData.type, fileData.name);
+    
+    // Create a unique file name using customer name and timestamp
+    const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMdd-HHmmss");
+    const newFileName = `${customerName}_${timestamp}_${fileData.name}`;
+    
+    const newFile = folder.createFile(blob).setName(newFileName);
+    const newFileId = newFile.getId();
+    const newFileNameInDrive = newFile.getName();
+
+    // Find and update the customer row in the correct sheet
+    const allowedSheets = getLoggedInUserAllowedSheets();
+    let rowUpdated = false;
+
+    for (const sheetName of allowedSheets) {
+      if(rowUpdated) break;
+      const config = SPREADSHEET_CONFIGS.find(c => c.name === sheetName);
+      if (!config) continue;
+      
+      const spreadsheet = SpreadsheetApp.openById(config.id);
+      for (const tabName of Object.values(CUSTOMER_STATUS_TAB_NAMES)) {
+        const sheet = spreadsheet.getSheetByName(tabName);
+        if (!sheet || sheet.getLastRow() < 2) continue;
+        
+        const idCol = CUSTOMER_SHEET_HEADERS.indexOf('ID') + 1;
+        const attachmentCol = CUSTOMER_SHEET_HEADERS.indexOf('ไฟล์ใบเสนอราคา') + 1;
+        
+        const ids = sheet.getRange(2, idCol, sheet.getLastRow() - 1, 1).getValues();
+        const rowIndexInSheet = ids.findIndex(row => row[0] === customerId);
+
+        if (rowIndexInSheet !== -1) {
+          const sheetRow = rowIndexInSheet + 2;
+          const attachmentCell = sheet.getRange(sheetRow, attachmentCol);
+          const existingAttachmentsRaw = attachmentCell.getValue();
+          let attachments = [];
+          try {
+            if (existingAttachmentsRaw) {
+              attachments = JSON.parse(existingAttachmentsRaw);
+            }
+          } catch(e) { /* existing data is not valid JSON, start fresh */ }
+          
+          attachments.push({ name: newFileNameInDrive, id: newFileId });
+          attachmentCell.setValue(JSON.stringify(attachments));
+          rowUpdated = true;
+          break; 
+        }
+      }
+    }
+
+    if(rowUpdated) {
+      return { success: true, message: "อัปโหลดไฟล์สำเร็จ" };
+    } else {
+      return { success: false, message: "หาลูกค้าไม่พบเพื่อแนบไฟล์" };
+    }
+  } catch (e) {
+    logErrorToSheet("uploadFileAndLinkToCustomer", e);
+    return { success: false, message: "เกิดข้อผิดพลาดในการอัปโหลด: " + e.message };
+  }
+}
