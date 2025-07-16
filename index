@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <base target="_top">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CRMSYB - Dashboard</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    
+    <?!= HtmlService.createHtmlOutputFromFile('style').getContent(); ?>
+</head>
+<body class="flex h-screen overflow-hidden font-inter">
+
+<div id="fullScreenLoader" class="fixed top-0 left-0 w-full h-full bg-gray-100 bg-opacity-90 flex flex-col items-center justify-center z-[2000]">
+    <div class="spinner border-t-blue-600 w-16 h-16"></div>
+    <p class="mt-4 text-lg text-gray-700">กำลังโหลดข้อมูล...</p>
+</div>
+
+    <aside class="w-20 bg-gradient-to-br from-gray-100 to-gray-200 text-gray-800 shadow-lg flex flex-col rounded-r-xl transition-all duration-300">
+        <div class="p-4 text-center border-b border-gray-300">
+            <a href="https://www.vacuumpump-thai.com" target="_blank" rel="noopener noreferrer" title="เยี่ยมชมเว็บไซต์ www.vacuumpump-thai.com" class="block">
+                <i class="fas fa-cubes text-3xl text-gray-700 hover:text-blue-600 transition-colors duration-200"></i>
+                <span class="sr-only">เยี่ยมชมเว็บไซต์ www.vacuumpump-thai.com</span>
+            </a>
+        </div>
+        <nav class="flex-1 px-2 py-6 space-y-4" aria-label="เมนูหลัก">
+            <a href="#dashboardPage" id="dashboardNav" title="แดชบอร์ด" class="flex items-center justify-center p-3 rounded-lg hover:bg-gray-300 transition-colors duration-200 group active-nav">
+                <i class="fas fa-tachometer-alt text-2xl group-hover:scale-110 transition-transform duration-200"></i>
+                <span class="sr-only">แดชบอร์ด</span>
+            </a>
+            <a href="#homePage" id="homeNav" title="เพิ่มข้อมูลลูกค้า" class="flex items-center justify-center p-3 rounded-lg hover:bg-gray-300 transition-colors duration-200 group">
+                <i class="fas fa-plus-circle text-2xl group-hover:scale-110 transition-transform duration-200"></i>
+                <span class="sr-only">เพิ่มข้อมูลลูกค้า</span>
+            </a>
+            <a href="#customerListPage" id="customerListNav" title="ข้อมูลลูกค้า" class="flex items-center justify-center p-3 rounded-lg hover:bg-gray-300 transition-colors duration-200 group">
+                <i class="fas fa-users text-2xl group-hover:scale-110 transition-transform duration-200"></i>
+                <span class="sr-only">ข้อมูลลูกค้า</span>
+            </a>
+            <a href="#reportPage" id="reportNav" title="รายงาน" class="flex items-center justify-center p-3 rounded-lg hover:bg-gray-300 transition-colors duration-200 group">
+                <i class="fas fa-chart-bar text-2xl group-hover:scale-110 transition-transform duration-200"></i>
+                <span class="sr-only">รายงาน</span>
+            </a>
+            <a href="#settingsPage" id="settingsNav" title="ตั้งค่า" class="flex items-center justify-center p-3 rounded-lg hover:bg-gray-300 transition-colors duration-200 group">
+                <i class="fas fa-cog text-2xl group-hover:scale-110 transition-transform duration-200"></i>
+                <span class="sr-only">ตั้งค่า</span>
+            </a>
+            <a href="#adminPage" id="adminNav" title="Admin" class="flex items-center justify-center p-3 rounded-lg hover:bg-gray-300 transition-colors duration-200 group hidden">
+                <i class="fas fa-user-shield text-2xl group-hover:scale-110 transition-transform duration-200"></i>
+                <span class="sr-only">Admin</span>
+            </a>
+            <a href="#" id="loginLogoutNav" title="ล็อกอิน" class="flex items-center justify-center p-3 rounded-lg hover:bg-gray-300 transition-colors duration-200 group">
+                <i class="fas fa-sign-in-alt text-2xl group-hover:scale-110 transition-transform duration-200"></i>
+                <span id="loginLogoutText" class="sr-only">ล็อกอิน</span>
+            </a>
+        </nav>
+        <div class="p-4 border-t border-gray-300 text-sm text-center text-gray-600 hidden">
+            &copy; 2025 SYB
+        </div>
+    </aside>
+
+    <main class="flex-1 flex flex-col bg-gray-100 p-6 overflow-hidden">
+        <header class="bg-white shadow-md py-2 px-4 rounded-xl mb-4 flex items-center justify-between">
+            <h1 id="mainHeaderTitle" class="text-2xl font-bold text-gray-800">แดชบอร์ดภาพรวม</h1>
+            <div class="flex items-center space-x-4">
+                <div id="userDisplayArea" class="hidden items-center space-x-2 bg-emerald-100 text-emerald-800 py-1 px-3 rounded-full shadow-sm mr-4" aria-live="polite">
+                    <i class="fas fa-user-circle text-emerald-600"></i>
+                    <span id="loggedInUsername" class="font-medium text-sm"></span>
+                </div>
+                
+                <button id="mainActionButton" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition-all duration-200 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center">
+                    <i class="fas fa-plus mr-2"></i> เพิ่มลูกค้าใหม่
+                </button>
+
+                <button id="saveButton" class="bg-gray-700 hover:bg-gray-800 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition-all duration-200 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-gray-600 focus:ring-offset-2 flex items-center justify-center hidden">
+                    <i class="fas fa-save mr-2" aria-hidden="true" id="saveIcon"></i> <span id="saveButtonText">บันทึกข้อมูล</span>
+                    <i class="fas fa-spinner fa-spin ml-2 hidden" id="saveSpinner"></i>
+                </button>
+                <button id="cancelButton" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded-lg shadow-md transition-all duration-200 transform hover:scale-105 flex items-center justify-center hidden">
+                    <i class="fas fa-times mr-2" aria-hidden="true"></i> ยกเลิก
+                </button>
+            </div>
+        </header>
+        <section id="dashboardPage" class="flex-1 overflow-y-auto scrollable-content p-2">
+            <div class="space-y-6">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <div class="bg-white p-6 rounded-xl shadow-lg flex items-center space-x-4">
+                        <div class="bg-blue-100 p-3 rounded-full"><i class="fas fa-users text-2xl text-blue-600"></i></div>
+                        <div>
+                            <p class="text-gray-500 text-sm font-medium">ลูกค้าทั้งหมด</p>
+                            <p id="kpiTotalCustomers" class="text-3xl font-bold text-gray-800">0</p>
+                        </div>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl shadow-lg flex items-center space-x-4">
+                        <div class="bg-green-100 p-3 rounded-full"><i class="fas fa-user-plus text-2xl text-green-600"></i></div>
+                        <div>
+                            <p class="text-gray-500 text-sm font-medium">ลูกค้าใหม่ (เดือนนี้)</p>
+                            <p id="kpiNewCustomers" class="text-3xl font-bold text-gray-800">0</p>
+                        </div>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl shadow-lg flex items-center space-x-4">
+                        <div class="bg-purple-100 p-3 rounded-full"><i class="fas fa-crown text-2xl text-purple-600"></i></div>
+                        <div>
+                            <p class="text-gray-500 text-sm font-medium">ลูกค้าคนสำคัญ (Key+A)</p>
+                            <p id="kpiActivities" class="text-3xl font-bold text-gray-800">0</p>
+                        </div>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl shadow-lg flex items-center space-x-4">
+                        <div class="bg-red-100 p-3 rounded-full"><i class="fas fa-user-clock text-2xl text-red-600"></i></div>
+                        <div>
+                            <p class="text-gray-500 text-sm font-medium">ต้องติดตามด่วน</p>
+                            <p id="kpiFollowUp" class="text-3xl font-bold text-gray-800">0</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="lg:col-span-1 bg-white p-6 rounded-xl shadow-lg">
+                        <h3 class="text-lg font-semibold text-gray-700 mb-4">สัดส่วนสถานะลูกค้า</h3>
+                        <div class="relative h-64"><canvas id="dashboardStatusChart"></canvas></div>
+                    </div>
+                    <div class="lg:col-span-2 bg-white p-6 rounded-xl shadow-lg">
+                        <h3 class="text-lg font-semibold text-gray-700 mb-4">การเติบโตของลูกค้า (6 เดือนย้อนหลัง)</h3>
+                        <div class="relative h-64"><canvas id="dashboardGrowthChart"></canvas></div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="bg-white p-6 rounded-xl shadow-lg">
+                        <h3 class="text-lg font-semibold text-gray-700 mb-4">ลูกค้าที่ต้องติดตามด่วน (>90 วัน)</h3>
+                        <div id="dashboardFollowUpList" class="space-y-3">
+                            <p class="text-gray-500">กำลังโหลดข้อมูล...</p>
+                        </div>
+                    </div>
+                     <div class="bg-white p-6 rounded-xl shadow-lg">
+                        <h3 class="text-lg font-semibold text-gray-700 mb-4">ลูกค้าที่เพิ่มล่าสุด</h3>
+                        <div id="dashboardActivityFeed" class="space-y-3">
+                             <p class="text-gray-500">กำลังโหลดข้อมูล...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="homePage" class="flex-1 overflow-y-auto scrollable-content p-2 hidden" role="region">
+            <div class="bg-white p-8 rounded-xl shadow-lg">
+                <form id="dataForm" class="space-y-8">
+                    <h2 class="text-2xl font-semibold text-gray-700 mb-6 border-b pb-3">ข้อมูลบริษัท</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="companyName" class="block text-gray-700 text-sm font-bold mb-2">ชื่อบริษัท: <span class="text-red-500">*</span></label>
+                            <input type="text" id="companyName" name="companyName" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" placeholder="กรอกชื่อบริษัท" required>
+                            <p class="text-red-500 text-xs italic hidden" id="companyNameError">กรุณากรอกชื่อบริษัท</p>
+                        </div>
+                        <div class="md:col-span-2">
+                            <label for="address" class="block text-gray-700 text-sm font-bold mb-2">ที่อยู่:</label>
+                            <textarea id="address" name="address" rows="3" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" placeholder="กรอกที่อยู่บริษัท"></textarea>
+                        </div>
+                        <div>
+                            <label for="product" class="block text-gray-700 text-sm font-bold mb-2">ผลิต:</label>
+                            <input type="text" id="product" name="product" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" placeholder="สินค้าที่บริษัทผลิต/บริการหลัก">
+                        </div>
+                        <div>
+                            <label for="usedProduct" class="block text-gray-700 text-sm font-bold mb-2">สินค้าที่ใช้:</label>
+                            <div class="relative flex items-center space-x-2">
+                                <div id="usedProductDisplay" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight bg-white flex-1 cursor-pointer flex items-center justify-between" tabindex="0" role="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="productSelectionModal">
+                                    <span class="text-gray-500">เลือกสินค้าหรือบริการ</span>
+                                    <i class="fas fa-chevron-down text-gray-400" aria-hidden="true"></i>
+                                </div>
+                                <input type="hidden" id="usedProduct" name="usedProduct" value="">
+                                <button type="button" id="openProductSelectionModalButton" class="bg-blue-500 hover:bg-blue-600 text-white p-2 rounded-lg shadow-md transition-all duration-200" aria-label="เพิ่มสินค้า/บริการ">
+                                    <i class="fas fa-plus" aria-hidden="true"></i>
+                                </button>
+                            </div>
+                            <div id="selectedProductsList" class="mt-2 flex flex-wrap gap-2" aria-live="polite">
+                            </div>
+                        </div>
+                        <div>
+                            <label for="website" class="block text-gray-700 text-sm font-bold mb-2">เว็บไซต์:</label>
+                            <input type="url" id="website" name="website" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" placeholder="เช่น https://www.example.com">
+                            <p class="text-red-500 text-xs italic hidden" id="websiteError">รูปแบบเว็บไซต์ไม่ถูกต้อง</p>
+                        </div>
+                        <div>
+                            <label for="primaryPhone" class="block text-gray-700 text-sm font-bold mb-2">เบอร์โทร (หลัก):</label>
+                            <input type="tel" id="primaryPhone" name="primaryPhone" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" placeholder="เช่น 08XXXXXXXX">
+                            <p class="text-red-500 text-xs italic hidden" id="primaryPhoneError">รูปแบบเบอร์โทรไม่ถูกต้อง</p>
+                        </div>
+                        <div>
+                            <label for="primaryEmail" class="block text-gray-700 text-sm font-bold mb-2">อีเมล (หลัก):</label>
+                            <input type="email" id="primaryEmail" name="primaryEmail" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" placeholder="เช่น info@example.com">
+                            <p class="text-red-500 text-xs italic hidden" id="primaryEmailError">รูปแบบอีเมลไม่ถูกต้อง</p>
+                        </div>
+                    </div>
+
+                    <h2 class="text-2xl font-semibold text-gray-700 mb-6 border-b pb-3 mt-10">ข้อมูลผู้ติดต่อ 1</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="contact1Name" class="block text-gray-700 text-sm font-bold mb-2">ชื่อผู้ติดต่อ 1:</label>
+                            <input type="text" id="contact1Name" name="contact1Name" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" placeholder="ชื่อ-นามสกุล ผู้ติดต่อ">
+                        </div>
+                        <div>
+                            <label for="contact1Position" class="block text-gray-700 text-sm font-bold mb-2">ตำแหน่ง:</label>
+                            <input type="text" id="contact1Position" name="contact1Position" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" placeholder="เช่น ผู้จัดการ, เลขา">
+                        </div>
+                        <div>
+                            <label for="contact1Phone" class="block text-gray-700 text-sm font-bold mb-2">เบอร์ติดต่อ:</label>
+                            <input type="tel" id="contact1Phone" name="contact1Phone" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" placeholder="เช่น 08XXXXXXXX">
+                            <p class="text-red-500 text-xs italic hidden" id="contact1PhoneError">รูปแบบเบอร์โทรไม่ถูกต้อง</p>
+                        </div>
+                        <div>
+                            <label for="contact1Email" class="block text-gray-700 text-sm font-bold mb-2">อีเมล:</label>
+                            <input type="email" id="contact1Email" name="contact1Email" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" placeholder="เช่น contact1@example.com">
+                            <p class="text-red-500 text-xs italic hidden" id="contact1EmailError">รูปแบบอีเมลไม่ถูกต้อง</p>
+                        </div>
+                    </div>
+
+                    <h2 class="text-2xl font-semibold text-gray-700 mb-6 border-b pb-3 mt-10">ข้อมูลผู้ติดต่อ 2</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="contact2Name" class="block text-gray-700 text-sm font-bold mb-2">ชื่อผู้ติดต่อ 2:</label>
+                            <input type="text" id="contact2Name" name="contact2Name" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" placeholder="ชื่อ-นามสกุล ผู้ติดต่อ">
+                        </div>
+                        <div>
+                            <label for="contact2Position" class="block text-gray-700 text-sm font-bold mb-2">ตำแหน่ง:</label>
+                            <input type="text" id="contact2Position" name="contact2Position" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" placeholder="เช่น ผู้จัดการ, เลขา">
+                        </div>
+                        <div>
+                            <label for="contact2Phone" class="block text-gray-700 text-sm font-bold mb-2">เบอร์ติดต่อ:</label>
+                            <input type="tel" id="contact2Phone" name="contact2Phone" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" placeholder="เช่น 08XXXXXXXX">
+                            <p class="text-red-500 text-xs italic hidden" id="contact2PhoneError">รูปแบบเบอร์โทรไม่ถูกต้อง</p>
+                        </div>
+                        <div>
+                            <label for="contact2Email" class="block text-gray-700 text-sm font-bold mb-2">อีเมล:</label>
+                            <input type="email" id="contact2Email" name="contact2Email" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" placeholder="เช่น contact2@example.com">
+                            <p class="text-red-500 text-xs italic hidden" id="contact2EmailError">รูปแบบอีเมลไม่ถูกต้อง</p>
+                        </div>
+                    </div>
+
+                    <h2 class="text-2xl font-semibold text-gray-700 mb-6 border-b pb-3 mt-10">ข้อมูลผู้ติดต่อ 3</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="contact3Name" class="block text-gray-700 text-sm font-bold mb-2">ชื่อผู้ติดต่อ 3:</label>
+                            <input type="text" id="contact3Name" name="contact3Name" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" placeholder="ชื่อ-นามสกุล ผู้ติดต่อ">
+                        </div>
+                        <div>
+                            <label for="contact3Position" class="block text-gray-700 text-sm font-bold mb-2">ตำแหน่ง:</label>
+                            <input type="text" id="contact3Position" name="contact3Position" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" placeholder="เช่น ผู้จัดการ, เลขา">
+                        </div>
+                        <div>
+                            <label for="contact3Phone" class="block text-gray-700 text-sm font-bold mb-2">เบอร์ติดต่อ:</label>
+                            <input type="tel" id="contact3Phone" name="contact3Phone" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" placeholder="เช่น 08XXXXXXXX">
+                            <p class="text-red-500 text-xs italic hidden" id="contact3PhoneError">รูปแบบเบอร์โทรไม่ถูกต้อง</p>
+                        </div>
+                        <div>
+                            <label for="contact3Email" class="block text-gray-700 text-sm font-bold mb-2">อีเมล:</label>
+                            <input type="email" id="contact3Email" name="contact3Email" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" placeholder="เช่น contact3@example.com">
+                            <p class="text-red-500 text-xs italic hidden" id="contact3EmailError">รูปแบบอีเมลไม่ถูกต้อง</p>
+                        </div>
+                    </div>
+
+                    <h2 class="text-2xl font-semibold text-gray-700 mb-6 border-b pb-3 mt-10">สถานะและคอมเม้น</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="status" class="block text-gray-700 text-sm font-bold mb-2">สถานะ: <span class="text-red-500">*</span></label>
+                            <div class="relative">
+                                <select id="status" name="status" class="block appearance-none w-full bg-white border border-gray-300 text-gray-700 py-3 px-4 pr-8 rounded-lg shadow-sm leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" required>
+                                    <option value="">เลือกสถานะลูกค้า</option>
+                                    <option value="ลูกค้า Key">ลูกค้า Key</option>
+                                    <option value="ลูกค้าเกรด A">ลูกค้าเกรด A</option>
+                                    <option value="ลูกค้าเกรด B">ลูกค้าเกรด B</option>
+                                    <option value="ลูกค้าใหม่">ลูกค้าใหม่</option>
+                                </select>
+                                <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
+                                    <svg class="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                                </div>
+                            </div>
+                            <p class="text-red-500 text-xs italic hidden" id="statusError">กรุณาเลือกสถานะลูกค้า</p>
+                        </div>
+                        <div class="md:col-span-2">
+                            <label for="comment" class="block text-gray-700 text-sm font-bold mb-2">คอมเม้น:</label>
+                            <textarea id="comment" name="comment" rows="4" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" placeholder="เพิ่มคอมเม้นหรือหมายเหตุเพิ่มเติม"></textarea>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-end mt-8">
+                        <label for="targetSpreadsheetSelect" class="block text-gray-700 text-sm font-bold mb-2 mr-4">บันทึกลงชีท: <span class="text-red-500">*</span></label>
+                        <select id="targetSpreadsheetSelect" name="targetSpreadsheetName" class="block appearance-none w-1/2 md:w-1/3 lg:w-1/4 bg-white border border-gray-300 text-gray-700 py-2 px-3 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-400 mr-4" required></select>
+                        <p class="text-red-500 text-xs italic hidden" id="targetSpreadsheetSelectError">กรุณาเลือกชีทที่จะบันทึก</p>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+        <section id="customerListPage" class="flex-1 flex flex-col overflow-y-auto scrollable-content p-2 hidden" role="region" aria-labelledby="customerListHeader">
+            <div class="bg-white p-8 rounded-xl shadow-lg flex-1 flex-col">
+                <h2 id="customerListHeader" class="text-2xl font-semibold text-gray-700 mb-6 border-b pb-3">ข้อมูลลูกค้า</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-x-8 gap-y-4 mb-4 border-b border-gray-200 pb-4 items-end">
+                    <div>
+                        <label for="viewSpreadsheetSelect" class="block text-gray-700 text-sm font-bold mb-2">เลือกชีทข้อมูลลูกค้า:</label>
+                        <select id="viewSpreadsheetSelect" class="block appearance-none w-full bg-white border border-gray-300 text-gray-700 py-2 px-3 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-400"></select>
+                    </div>
+                    <div class="md:row-span-2">
+                        <label class="block text-gray-700 text-sm font-bold mb-2">เลือกสถานะลูกค้า:</label>
+                        <div id="customerStatusCheckboxes" class="flex flex-wrap gap-x-6 gap-y-2" role="group" aria-label="ตัวกรองสถานะลูกค้า">
+                        </div>
+                    </div>
+                    <div class="flex items-center">
+                        <button id="loadCustomerDataButton" class="bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition-all duration-200 transform hover:scale-105">
+                            แสดงข้อมูล
+                        </button>
+                    </div>
+                    <div class="col-span-full md:col-span-3 mt-4">
+                        <label for="customerSearchInput" class="block text-gray-700 text-sm font-bold mb-2">ค้นหาลูกค้า:</label>
+                        <div class="relative flex items-center">
+                            <input type="text" id="customerSearchInput" placeholder="ค้นหาชื่อบริษัท, ชื่อผู้ติดต่อ, เบอร์โทร..." class="shadow-sm appearance-none border rounded-lg w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200 pr-10">
+                            <i class="fas fa-search absolute right-3 text-gray-400"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="customerTabContent" class="flex-1 overflow-y-auto relative"> <div id="customerTableContainer" class="customer-table-container">
+                        <table id="customerDataTable" class="customer-table" role="table" aria-live="polite">
+                            <thead>
+                            </thead>
+                            <tbody>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p id="noCustomerDataMessage" class="text-center text-gray-500 mt-8 hidden">ไม่มีข้อมูลลูกค้าสำหรับสถานะนี้</p>
+                    <div id="customerTableLoadingSpinner" class="loading-spinner-overlay hidden">
+                        <div class="spinner"></div>
+                        <p class="loading-text">กำลังโหลดข้อมูลลูกค้า...</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="reportPage" class="flex-1 flex flex-col overflow-y-auto scrollable-content p-2 hidden" role="region" aria-labelledby="reportHeader">
+            <div class="bg-white p-8 rounded-xl shadow-lg flex-1 flex-col">
+                <div class="flex border-b border-gray-300 mb-6" role="tablist">
+                    <button id="growthReportTab" class="report-tab-button active py-2 px-4 font-semibold text-gray-700" role="tab" aria-selected="true" aria-controls="growthReportContent">การเติบโตของลูกค้า</button>
+                    <button id="statusReportTab" class="report-tab-button py-2 px-4 text-gray-500 hover:text-gray-700" role="tab" aria-selected="false" aria-controls="statusReportContent">สถานะลูกค้า</button>
+                    <button id="contactPerformanceReportTab" class="report-tab-button py-2 px-4 text-gray-500 hover:text-gray-700" role="tab" aria-selected="false" aria-controls="contactPerformanceReportContent">ประสิทธิภาพการติดต่อ</button>
+                    <button id="productUsageReportTab" class="report-tab-button py-2 px-4 text-gray-500 hover:text-gray-700" role="tab" aria-selected="false" aria-controls="productUsageReportContent">สินค้า/บริการที่ใช้</button>
+                </div>
+
+                <div class="mb-6 pb-4 border-b border-gray-200">
+                    <h2 id="reportHeader" class="text-xl font-semibold text-gray-700 mb-4">ตัวกรองรายงาน</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                        <div>
+                            <label for="reportSpreadsheetSelect" class="block text-gray-700 text-sm font-bold mb-2">เลือกชีท:</label>
+                            <select id="reportSpreadsheetSelect" class="block appearance-none w-full bg-white border border-gray-300 text-gray-700 py-2 px-3 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-400"></select>
+                        </div>
+                        <div id="timeframeFilterContainer">
+                            <label for="reportTimeframe" class="block text-gray-700 text-sm font-bold mb-2">ช่วงเวลา:</label>
+                            <select id="reportTimeframe" class="block appearance-none w-full bg-white border border-gray-300 text-gray-700 py-2 px-3 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-400">
+                                <option value="monthly">รายเดือน</option>
+                                <option value="yearly">รายปี</option>
+                                <option value="all-time">ตลอดระยะเวลา</option>
+                            </select>
+                        </div>
+                        <div id="inactiveDaysFilterContainer" class="hidden">
+                            <label for="inactiveDaysFilter" class="block text-gray-700 text-sm font-bold mb-2">ไม่ได้ติดต่อนานกว่า (วัน):</label>
+                            <select id="inactiveDaysFilter" class="block appearance-none w-full bg-white border border-gray-300 text-gray-700 py-2 px-3 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-400">
+                                <option value="0">ทั้งหมด</option>
+                                <option value="30">30 วัน</option>
+                                <option value="60">60 วัน</option>
+                                <option value="90">90 วัน</option>
+                                <option value="180">180 วัน</option>
+                                <option value="365">365 วัน</option>
+                            </select>
+                        </div>
+                        <div>
+                            <button id="generateReportButton" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition-all duration-200 transform hover:scale-105">
+                                สร้างรายงาน
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="growthReportContent" role="tabpanel" aria-labelledby="growthReportTab">
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div class="p-4 border rounded-lg shadow-sm">
+                            <h3 class="text-lg font-semibold text-gray-600 mb-2 text-center">จำนวนลูกค้าใหม่ตามช่วงเวลา</h3>
+                            <div class="relative min-h-[300px] max-h-[400px]">
+                                <canvas id="newCustomersChart"></canvas>
+                                <div id="loadingNewCustomersMessage" class="loading-spinner-overlay hidden">
+                                    <div class="spinner"></div>
+                                    <p class="loading-text">กำลังโหลดรายงาน...</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-4 border rounded-lg shadow-sm">
+                            <h3 class="text-lg font-semibold text-gray-600 mb-2 text-center">การเติบโตสะสมของลูกค้า</h3>
+                            <div class="relative min-h-[300px] max-h-[400px]">
+                                <canvas id="cumulativeGrowthChart"></canvas>
+                                <div id="loadingCumulativeGrowthMessage" class="loading-spinner-overlay hidden">
+                                    <div class="spinner"></div>
+                                    <p class="loading-text">กำลังโหลดรายงาน...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <p id="noReportDataMessage" class="text-center text-gray-500 mt-8 hidden">ไม่มีข้อมูลสำหรับสร้างรายงาน</p>
+                </div>
+
+                <div id="statusReportContent" class="hidden" role="tabpanel" aria-labelledby="statusReportTab">
+                    <div class="flex justify-center">
+                        <div class="p-4 border rounded-lg shadow-sm w-full lg:w-2/3">
+                            <h3 class="text-lg font-semibold text-gray-600 mb-2 text-center">สัดส่วนลูกค้าตามสถานะ</h3>
+                            <div class="relative min-h-[300px] max-h-[500px]">
+                                <canvas id="customerStatusChart"></canvas>
+                                <div id="loadingStatusReportMessage" class="loading-spinner-overlay hidden">
+                                    <div class="spinner"></div>
+                                    <p class="loading-text">กำลังโหลดรายงาน...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="customerStatusTableContainer" class="mt-8"></div>
+                    <p id="noStatusReportDataMessage" class="text-center text-gray-500 mt-8 hidden">ไม่มีข้อมูลสำหรับสร้างรายงานสถานะ</p>
+                </div>
+
+                <div id="contactPerformanceReportContent" class="hidden" role="tabpanel" aria-labelledby="contactPerformanceReportTab">
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div class="p-4 border rounded-lg shadow-sm">
+                            <h3 class="text-lg font-semibold text-gray-600 mb-2 text-center">ความถี่ในการติดต่อลูกค้า (จำนวนครั้ง)</h3>
+                            <div class="relative min-h-[300px] max-h-[400px]">
+                                <canvas id="contactFrequencyChart"></canvas>
+                                <div id="loadingContactFrequencyMessage" class="loading-spinner-overlay hidden">
+                                    <div class="spinner"></div>
+                                    <p class="loading-text">กำลังโหลดรายงาน...</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-4 border rounded-lg shadow-sm">
+                            <h3 class="text-lg font-semibold text-gray-600 mb-2 text-center">ลูกค้าที่ไม่ได้ติดต่อมานาน</h3>
+                            <div id="inactiveCustomersTableContainer" class="overflow-x-auto w-full relative">
+                                <table id="inactiveCustomersTable" class="min-w-full divide-y divide-gray-200">
+                                    <thead class="bg-gray-50">
+                                        <tr>
+                                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ชื่อบริษัท</th>
+                                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">สถานะ</th>
+                                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ติดต่อล่าสุด</th>
+                                            <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">ไม่ได้ติดต่อนาน (วัน)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white divide-y divide-gray-200">
+                                    </tbody>
+                                </table>
+                                <p id="noInactiveCustomersMessage" class="text-center text-gray-500 mt-4 hidden">ไม่มีลูกค้าที่ไม่ได้ติดต่อมานานกว่าที่กำหนด</p>
+                                <div id="loadingInactiveCustomersMessage" class="loading-spinner-overlay hidden">
+                                    <div class="spinner"></div>
+                                    <p class="loading-text">กำลังโหลดข้อมูล...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <p id="noContactPerformanceDataMessage" class="text-center text-gray-500 mt-8 hidden">ไม่มีข้อมูลสำหรับสร้างรายงานประสิทธิภาพการติดต่อ</p>
+                </div>
+
+                <div id="productUsageReportContent" class="hidden" role="tabpanel" aria-labelledby="productUsageReportTab">
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div class="p-4 border rounded-lg shadow-sm">
+                            <h3 class="text-lg font-semibold text-gray-600 mb-2 text-center">สินค้า/บริการยอดนิยม (จำนวนลูกค้าที่เกี่ยวข้อง)</h3>
+                            <div class="relative min-h-[300px] max-h-[400px]">
+                                <canvas id="productUsageBarChart"></canvas>
+                                <div id="loadingProductUsageBarChartMessage" class="loading-spinner-overlay hidden">
+                                    <div class="spinner"></div>
+                                    <p class="loading-text">กำลังโหลดรายงาน...</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-4 border rounded-lg shadow-sm">
+                            <h3 class="text-lg font-semibold text-gray-600 mb-2 text-center">สัดส่วนลูกค้าตามประเภทสินค้า/บริการ</h3>
+                            <div class="relative min-h-[300px] max-h-[500px]">
+                                <canvas id="productUsagePieChart"></canvas>
+                                <div id="loadingProductUsagePieChartMessage" class="loading-spinner-overlay hidden">
+                                    <div class="spinner"></div>
+                                    <p class="loading-text">กำลังโหลดรายงาน...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <p id="noProductUsageDataMessage" class="text-center text-gray-500 mt-8 hidden">ไม่มีข้อมูลสำหรับสร้างรายงานสินค้า/บริการ</p>
+                </div>
+
+            </div>
+        </section>
+
+        <section id="adminPage" class="flex-1 flex flex-col overflow-y-auto scrollable-content p-2 hidden" role="region" aria-labelledby="adminHeader">
+            <div class="bg-white p-8 rounded-xl shadow-lg flex-1 flex-col">
+                <h2 id="adminHeader" class="text-2xl font-semibold text-gray-700 mb-6 border-b pb-3">จัดการผู้ใช้</h2>
+
+                <div class="mb-8 p-6 bg-gray-50 rounded-lg shadow-sm">
+                    <h3 class="text-xl font-semibold text-gray-700 mb-4 border-b pb-2">เพิ่มผู้ใช้ใหม่</h3>
+                    <form id="addUserForm" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label for="newUsername" class="block text-gray-700 text-sm font-bold mb-2">ชื่อผู้ใช้: <span class="text-red-500">*</span></label>
+                            <input type="text" id="newUsername" name="newUsername" class="shadow-sm border rounded-lg w-full py-2 px-3 text-gray-700" placeholder="ชื่อผู้ใช้ใหม่" required>
+                            <p class="text-red-500 text-xs italic hidden" id="newUsernameError">กรุณากรอกชื่อผู้ใช้</p>
+                        </div>
+                        <div>
+                            <label for="newPassword" class="block text-gray-700 text-sm font-bold mb-2">รหัสผ่าน: <span class="text-red-500">*</span></label>
+                            <input type="password" id="newPassword" name="newPassword" class="shadow-sm border rounded-lg w-full py-2 px-3 text-gray-700" placeholder="รหัสผ่าน" required>
+                            <p class="text-red-500 text-xs italic hidden" id="newPasswordError">กรุณากรอกรหัสผ่าน</p>
+                        </div>
+                        <div>
+                            <label for="newUserRole" class="block text-gray-700 text-sm font-bold mb-2">บทบาท: <span class="text-red-500">*</span></label>
+                            <select id="newUserRole" name="newUserRole" class="block appearance-none w-full bg-white border border-gray-300 text-gray-700 py-2 px-3 rounded-lg shadow-sm" required>
+                                <option value="user ปกติ">user ปกติ</option>
+                                <option value="super user">super user</option>
+                            </select>
+                            <p class="text-red-500 text-xs italic hidden" id="newUserRoleError">กรุณาเลือกบทบาท</p>
+                        </div>
+                        <div class="md:col-span-3">
+                            <label for="newUserAllowedSheets" class="block text-gray-700 text-sm font-bold mb-2">ชีทที่อนุญาต (เลือกได้หลายรายการ):</label>
+                            <select id="newUserAllowedSheets" name="newUserAllowedSheets" multiple class="shadow-sm border rounded-lg w-full py-2 px-3 text-gray-700 h-24 focus:outline-none focus:ring-2 focus:ring-gray-400"></select>
+                            <p class="text-red-500 text-xs italic hidden" id="newUserAllowedSheetsError">กรุณาเลือกอย่างน้อยหนึ่งชีทที่อนุญาต</p>
+                        </div>
+                        <div class="md:col-span-3 flex justify-end">
+                            <button type="submit" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-6 rounded-lg shadow-md transition-all duration-200 flex items-center justify-center">
+                                <i class="fas fa-user-plus mr-2" aria-hidden="true" id="addUserIcon"></i> <span id="addUserButtonText">เพิ่มผู้ใช้</span>
+                                <i class="fas fa-spinner fa-spin ml-2 hidden" id="addUserSpinner"></i>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <h3 class="text-xl font-semibold text-gray-700 mb-4 border-b pb-2">รายการผู้ใช้</h3>
+                <div class="users-table-container relative"> <table id="usersDataTable" class="users-table" role="table" aria-live="polite">
+                        <thead>
+                            <tr>
+                                <th scope="col">Username</th>
+                                <th scope="col">Password (Hashed)</th>
+                                <th scope="col">Role</th>
+                                <th scope="col">Allowed Sheets</th>
+                                <th scope="col">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        </tbody>
+                    </table>
+                    <p id="noUsersMessage" class="text-center text-gray-500 mt-8 hidden">ไม่มีข้อมูลผู้ใช้</p>
+                    <div id="usersTableLoadingSpinner" class="loading-spinner-overlay hidden">
+                        <div class="spinner"></div>
+                        <p class="loading-text">กำลังโหลดผู้ใช้...</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="settingsPage" class="flex-1 flex flex-col overflow-y-auto scrollable-content p-2 hidden" role="region" aria-labelledby="settingsHeader">
+            <div class="bg-white p-8 rounded-xl shadow-lg flex-1 flex-col">
+                <div id="settingsAccessDenied" class="hidden text-center p-8 bg-red-50 border border-red-200 rounded-lg">
+                    <i class="fas fa-exclamation-triangle text-4xl text-red-500 mb-4" aria-hidden="true"></i>
+                    <h2 class="text-xl font-bold text-red-700" id="settingsHeader">ไม่ได้รับอนุญาต</h2>
+                    <p class="text-red-600 mt-2">คุณไม่มีสิทธิ์เข้าถึงหน้าตั้งค่าระบบ เฉพาะ Super User เท่านั้นที่สามารถจัดการส่วนนี้ได้</p>
+                </div>
+
+                <div id="settingsContent" class="hidden"> <div class="flex border-b border-gray-300 mb-6" role="tablist">
+                        <button id="productSettingsTab" class="settings-tab-button active py-2 px-4 font-semibold text-gray-700" role="tab" aria-selected="true" aria-controls="productSettingsContent">รายการสินค้า/บริการ</button>
+                        <button id="activityLogTab" class="settings-tab-button py-2 px-4 text-gray-500 hover:text-gray-700" role="tab" aria-selected="false" aria-controls="activityLogContent">บันทึกกิจกรรม</button>
+                    </div>
+
+                    <div id="productSettingsContent" role="tabpanel" aria-labelledby="productSettingsTab">
+                        <div class="flex justify-between items-center mb-6 border-b pb-3">
+                            <h3 class="text-2xl font-semibold text-gray-700">ตั้งค่ารายการสินค้า/บริการ</h3>
+                            <button id="addProductBtn" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition-all duration-200">
+                                <i class="fas fa-plus mr-2" aria-hidden="true"></i> เพิ่มรายการใหม่
+                            </button>
+                        </div>
+                        <div class="overflow-x-auto relative">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ชื่อสินค้า/บริการ</th>
+                                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ประเภท</th>
+                                        <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">จัดการ</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="productSettingsTableBody" class="bg-white divide-y divide-gray-200">
+                                </tbody>
+                            </table>
+                            <p id="noProductSettingsMessage" class="text-center text-gray-500 mt-8 hidden">ไม่พบรายการสินค้า/บริการ</p>
+                            <div id="productSettingsLoadingSpinner" class="loading-spinner-overlay hidden">
+                                <div class="spinner"></div>
+                                <p class="loading-text">กำลังโหลดรายการสินค้า...</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="activityLogContent" class="hidden" role="tabpanel" aria-labelledby="activityLogTab">
+                        <h3 class="text-2xl font-semibold text-gray-700 mb-6 border-b pb-3">บันทึกกิจกรรมผู้ใช้</h3>
+                        <div class="mb-4">
+                            <label for="activityLogSearchInput" class="block text-gray-700 text-sm font-bold mb-2">ค้นหากิจกรรม:</label>
+                            <input type="text" id="activityLogSearchInput" placeholder="ค้นหาประเภทกิจกรรม, ผู้ใช้, รายละเอียด..." class="shadow-sm appearance-none border rounded-lg w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200">
+                        </div>
+                        <div class="activity-log-table-container overflow-x-auto relative">
+                            <table id="activityLogTable" class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Timestamp</th>
+                                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User Email</th>
+                                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action Type</th>
+                                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Details</th>
+                                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="activityLogTableBody" class="bg-white divide-y divide-gray-200">
+                                </tbody>
+                            </table>
+                            <p id="noActivityLogMessage" class="text-center text-gray-500 mt-8 hidden">ไม่พบกิจกรรม</p>
+                            <div id="activityLogLoadingSpinner" class="loading-spinner-overlay hidden">
+                                <div class="spinner"></div>
+                                <p class="loading-text">กำลังโหลดบันทึกกิจกรรม...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div> </div>
+        </section>
+        </main>
+
+    <div id="notificationContainer" class="notification-container" aria-live="polite"></div>
+
+    <div id="messageBoxOverlay" class="message-box-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="messageBoxTitle"></div>
+    <div id="messageBox" class="message-box hidden" role="document">
+        <h2 id="messageBoxTitle" class="text-xl font-semibold mb-4"></h2>
+        <p id="messageBoxContent" class="mb-6"></p>
+        </div>
+
+    <div id="loginModalOverlay" class="message-box-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="loginModalTitle"></div>
+    <div id="loginModal" class="message-box hidden" role="document">
+        <div id="loginFormContainer">
+            <h2 id="loginModalTitle" class="text-2xl font-semibold text-gray-700 mb-6 border-b pb-3 text-center">เข้าสู่ระบบ</h2>
+            <form id="loginForm" class="space-y-6">
+                <div>
+                    <label for="username" class="block text-gray-700 text-sm font-bold mb-2">ชื่อผู้ใช้: <span class="text-red-500">*</span></label>
+                    <input type="text" id="username" name="username" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" placeholder="กรอกชื่อผู้ใช้" autocomplete="username" required>
+                    <p class="text-red-500 text-xs italic hidden" id="usernameError">กรุณากรอกชื่อผู้ใช้</p>
+                </div>
+                <div>
+                    <label for="password" class="block text-gray-700 text-sm font-bold mb-2">รหัสผ่าน: <span class="text-red-500">*</span></label>
+                    <input type="password" id="password" name="password" class="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent transition-all duration-200" placeholder="กรอกรหัสผ่าน" autocomplete="current-password" required>
+                    <p class="text-red-500 text-xs italic hidden" id="passwordError">กรุณากรอกรหัสผ่าน</p>
+                </div>
+                <button type="submit" id="loginButton" class="bg-gray-700 hover:bg-gray-800 text-white font-bold py-3 px-8 rounded-lg shadow-lg w-full transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-gray-600 focus:ring-offset-2 flex items-center justify-center">
+                    <span id="loginButtonText">เข้าสู่ระบบ</span>
+                    <i class="fas fa-spinner fa-spin ml-2 hidden" id="loginSpinner"></i>
+                </button>
+            </form>
+            <button type="button" id="closeLoginModal" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded-lg mt-4">
+                ปิด
+            </button>
+        </div>
+    </div>
+
+    <div id="editUserModalOverlay" class="message-box-overlay hidden"></div>
+    <div id="editUserModal" class="message-box hidden" role="document">
+        <h2 id="editUserModalTitle" class="text-xl font-semibold mb-4">แก้ไขผู้ใช้</h2>
+        <form id="editUserForm" class="space-y-4 text-left">
+            <input type="hidden" id="editOriginalUsername">
+            <div>
+                <label for="editUsername" class="block text-gray-700 text-sm font-bold mb-2">ชื่อผู้ใช้: <span class="text-red-500">*</span></label>
+                <input type="text" id="editUsername" name="editUsername" class="shadow-sm border rounded-lg w-full py-2 px-3 text-gray-700" required>
+                <p class="text-red-500 text-xs italic hidden" id="editUsernameError">กรุณากรอกชื่อผู้ใช้</p>
+            </div>
+            <div>
+                <label for="editPassword" class="block text-gray-700 text-sm font-bold mb-2">รหัสผ่าน (เว้นว่างหากไม่ต้องการเปลี่ยน):</label>
+                <input type="password" id="editPassword" name="editPassword" class="shadow-sm border rounded-lg w-full py-2 px-3 text-gray-700" placeholder="เว้นว่างหากไม่เปลี่ยน" autocomplete="new-password">
+                <p class="text-red-500 text-xs italic hidden" id="editPasswordError">กรุณากรอกรหัสผ่านใหม่หากต้องการเปลี่ยน</p>
+            </div>
+            <div>
+                <label for="editRole" class="block text-gray-700 text-sm font-bold mb-2">บทบาท: <span class="text-red-500">*</span></label>
+                <select id="editRole" name="editRole" class="block appearance-none w-full bg-white border border-gray-300 text-gray-700 py-2 px-3 rounded-lg shadow-sm" required>
+                    <option value="user ปกติ">user ปกติ</option>
+                    <option value="super user">super user</option>
+                </select>
+                <p class="text-red-500 text-xs italic hidden" id="editRoleError">กรุณาเลือกบทบาท</p>
+            </div>
+            <div>
+                <label for="editAllowedSheets" class="block text-gray-700 text-sm font-bold mb-2">ชีทที่อนุญาต (เลือกได้หลายรายการ):</label>
+                <select id="editAllowedSheets" name="editAllowedSheets" multiple class="shadow-sm border rounded-lg w-full py-2 px-3 text-gray-700 h-24 focus:outline-none focus:ring-2 focus:ring-gray-400"></select>
+                <p class="text-red-500 text-xs italic hidden" id="editAllowedSheetsError">กรุณาเลือกอย่างน้อยหนึ่งชีทที่อนุญาต</p>
+            </div>
+            <div class="flex justify-end space-x-4 mt-6">
+                <button type="button" id="cancelEditUser" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded-lg">
+                    ยกเลิก
+                </button>
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg flex items-center justify-center">
+                    <span id="editUserButtonText">บันทึกการแก้ไข</span>
+                    <i class="fas fa-spinner fa-spin ml-2 hidden" id="editUserSpinner"></i>
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <div id="commentHistoryModalOverlay" class="message-box-overlay hidden"></div>
+    <div id="commentHistoryModal" class="message-box hidden" style="max-width: 600px; text-align: left;" role="document">
+        <h2 id="commentHistoryModalTitle" class="text-xl font-semibold mb-4 border-b pb-2">ประวัติคอมเม้น</h2>
+        <div id="commentHistoryContent" class="space-y-2 max-h-60 overflow-y-auto p-2 border rounded-md mb-4 bg-gray-50" aria-live="polite">
+        </div>
+        <div id="newCommentSection" class="mt-4 hidden">
+            <label for="newCommentTextarea" class="block text-gray-700 text-sm font-bold mb-2">เพิ่มคอมเม้นใหม่:</label>
+            <textarea id="newCommentTextarea" rows="3" class="shadow-sm appearance-none border rounded-lg w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-indigo-400"></textarea>
+            <p class="text-red-500 text-xs italic hidden" id="newCommentTextareaError">กรุณากรอกคอมเม้นท์</p>
+        </div>
+        <div class="flex justify-end space-x-4 mt-6">
+            <button type="button" id="commentHistoryClose" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded-lg">
+                ปิด
+            </button>
+            <button type="button" id="saveNewCommentButton" class="hidden bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg flex items-center justify-center">
+                <span id="saveNewCommentButtonText">บันทึกคอมเม้น</span>
+                <i class="fas fa-spinner fa-spin ml-2 hidden" id="saveNewCommentSpinner"></i>
+            </button>
+        </div>
+    </div>
+
+    <div id="customTooltip" class="custom-tooltip" role="tooltip"></div>
+
+    <div id="productSelectionModalOverlay" class="message-box-overlay hidden"></div>
+    <div id="productSelectionModal" class="message-box hidden" style="max-width: 500px; text-align: left;" role="document">
+        <h2 id="productSelectionModalTitle" class="text-xl font-semibold mb-4 border-b pb-2 text-center">เลือกสินค้า/บริการ</h2>
+        <div class="space-y-4 mb-4">
+            <div>
+                <label for="productTypeSelect" class="block text-gray-700 text-sm font-bold mb-2">ประเภท: <span class="text-red-500">*</span></label>
+                <select id="productTypeSelect" class="shadow-sm appearance-none border rounded-lg w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400" required>
+                    <option value="">เลือกประเภท</option>
+                    <option value="สินค้า">สินค้า</option>
+                    <option value="บริการ">บริการ</option>
+                </select>
+                <p class="text-red-500 text-xs italic hidden" id="productTypeSelectError">กรุณาเลือกประเภทสินค้า/บริการ</p>
+            </div>
+            <div>
+                <label for="productSelect" class="block text-gray-700 text-sm font-bold mb-2">ชื่อ: <span class="text-red-500">*</span></label>
+                <select id="productSelect" class="shadow-sm appearance-none border rounded-lg w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400" required>
+                    <option value="">เลือกสินค้า/บริการ</option>
+                </select>
+                <p class="text-red-500 text-xs italic hidden" id="productSelectError">กรุณาเลือกสินค้า/บริการ</p>
+            </div>
+            <div id="productModelContainer">
+                <label for="productModel" class="block text-gray-700 text-sm font-bold mb-2">โมเดล (ถ้ามี):</label>
+                <input type="text" id="productModel" class="shadow-sm appearance-none border rounded-lg w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400" placeholder="กรอกโมเดล">
+            </div>
+            <div id="productQuantityContainer">
+                <label for="productQuantity" class="block text-gray-700 text-sm font-bold mb-2">จำนวน: <span class="text-red-500">*</span></label>
+                <input type="number" id="productQuantity" value="1" min="1" class="shadow-sm appearance-none border rounded-lg w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-gray-400" required>
+                <p class="text-red-500 text-xs italic hidden" id="productQuantityError">จำนวนต้องเป็นตัวเลขที่มากกว่า 0</p>
+            </div>
+            <button type="button" id="addProductItemButton" class="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition-all duration-200 w-full flex items-center justify-center">
+                <i class="fas fa-plus mr-2" aria-hidden="true"></i> เพิ่มรายการ
+            </button>
+        </div>
+        
+        <h3 class="text-lg font-semibold mb-2">รายการที่เลือก:</h3>
+        <div id="currentProductSelectionList" class="max-h-40 overflow-y-auto border border-gray-200 rounded-lg p-2 space-y-2">
+            <p id="noProductSelectedMessage" class="text-gray-500 text-center">ยังไม่มีสินค้าที่เลือก</p>
+        </div>
+
+        <div class="flex justify-end space-x-4 mt-6">
+            <button type="button" id="cancelProductSelection" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded-lg">
+                ยกเลิก
+            </button>
+            <button type="button" id="saveProductSelection" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg">
+                บันทึก
+            </button>
+        </div>
+    </div>
+
+
+    <div id="addProductModalOverlay" class="message-box-overlay hidden"></div>
+    <div id="addProductModal" class="message-box hidden" style="max-width: 450px; text-align: left;" role="document">
+        <h2 id="addProductModalTitle" class="text-xl font-semibold mb-4 border-b pb-2">เพิ่มรายการใหม่</h2>
+        <form id="addProductForm" class="space-y-4">
+            <input type="hidden" id="originalProductName">
+            <div>
+                <label for="newProductName" class="block text-gray-700 text-sm font-bold mb-2">ชื่อสินค้า/บริการ: <span class="text-red-500">*</span></label>
+                <input type="text" id="newProductName" name="newProductName" class="shadow-sm border rounded-lg w-full py-2 px-3 text-gray-700" required>
+                <p class="text-red-500 text-xs italic hidden" id="newProductNameError">กรุณากรอกชื่อสินค้า/บริการ</p>
+            </div>
+            <div>
+                <label for="newProductType" class="block text-gray-700 text-sm font-bold mb-2">ประเภท: <span class="text-red-500">*</span></label>
+                <select id="newProductType" name="newProductType" class="block appearance-none w-full bg-white border border-gray-300 text-gray-700 py-2 px-3 rounded-lg shadow-sm" required>
+                    <option value="สินค้า">สินค้า</option>
+                    <option value="บริการ">บริการ</option>
+                </select>
+                <p class="text-red-500 text-xs italic hidden" id="newProductTypeError">กรุณาเลือกประเภท</p>
+            </div>
+            <div class="flex justify-end space-x-4 mt-6">
+                <button type="button" id="cancelAddProductBtn" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded-lg">ยกเลิก</button>
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg flex items-center justify-center">
+                    <span id="addProductFormButtonText">บันทึก</span>
+                    <i class="fas fa-spinner fa-spin ml-2 hidden" id="addProductSpinner"></i>
+                </button>
+            </div>
+        </form>
+    </div>
+     <div id="uploadFileModal" class="message-box hidden" style="max-width: 450px; text-align: left;">
+    <h2 id="uploadModalTitle" class="text-xl font-semibold mb-4 border-b pb-2">แนบไฟล์สำหรับลูกค้า</h2>
+    <form id="uploadForm">
+        <input type="hidden" id="uploadCustomerId">
+        <div class="space-y-4">
+            <div>
+                <label for="fileInput" class="block text-gray-700 text-sm font-bold mb-2">เลือกไฟล์:</label>
+                <input type="file" id="fileInput" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
+                <p id="uploadStatus" class="text-sm text-gray-500 mt-2"></p>
+            </div>
+            <div class="flex justify-end space-x-4 mt-6">
+                <button type="button" id="cancelUploadBtn" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded-lg">ยกเลิก</button>
+                <button type="submit" id="submitUploadBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg flex items-center justify-center">
+                    <span id="uploadButtonText">อัปโหลด</span>
+                    <i class="fas fa-spinner fa-spin ml-2 hidden" id="uploadSpinner"></i>
+                </button>
+            </div>
+        </div>
+    </form>
+</div>
+
+<div id="viewAttachmentsModal" class="message-box hidden" style="max-width: 500px; text-align: left;">
+    <h2 class="text-xl font-semibold mb-4 border-b pb-2">ไฟล์ใบเสนอราคา</h2>
+    <div id="attachmentsList" class="space-y-2 max-h-60 overflow-y-auto">
+        </div>
+    <div class="flex justify-end mt-6">
+        <button type="button" id="closeAttachmentsModal" class="bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded-lg">ปิด</button>
+    </div>
+</div>
+    <?!= HtmlService.createHtmlOutputFromFile('script').getContent(); ?>
+</body>
+</html>
