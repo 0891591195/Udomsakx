@@ -1,0 +1,556 @@
+<style>
+/* --- NEW: CSS Custom Properties for Theming --- */
+:root {
+  --color-primary: #4f46e5;      /* Indigo-600 for active elements, spinners */
+  --color-success: #10b981;      /* Emerald-500 for success notifications */
+  --color-danger: #ef4444;       /* Red-500 for errors and invalid fields */
+  --color-info: #3b82f6;         /* Blue-500 for info notifications */
+  --color-warning: #f59e0b;      /* Amber-500 for warning notifications */
+  
+  --color-background: #f3f4f6;   /* Light gray page background */
+  --color-text-header: #4a5568;  /* Darker gray for table headers */
+  --color-row-hover: #edf2f7;      /* Light gray for table row hover */
+  --color-border-light: #e0e0e0;  /* Light gray for table cell borders */
+  --color-border-medium: #d1d5db; /* Medium gray for input borders on hover */
+  
+  --color-scrollbar-track: #e2e8f0;
+  --color-scrollbar-thumb: #94a3b8;
+  --color-scrollbar-thumb-hover: #64748b;
+
+  --color-tooltip-bg: #333;
+}
+
+/* * Base Styles and Global Utilities
+  * These styles apply broadly across the application for foundational elements.
+  */
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--color-background); /* USE VAR */
+}
+
+/* Custom scrollbar for improved user experience in scrollable content areas */
+.scrollable-content::-webkit-scrollbar {
+    width: 8px;
+}
+.scrollable-content::-webkit-scrollbar-track {
+    background: var(--color-scrollbar-track); /* USE VAR */
+    border-radius: 10px;
+}
+.scrollable-content::-webkit-scrollbar-thumb {
+    background: var(--color-scrollbar-thumb); /* USE VAR */
+    border-radius: 10px;
+}
+.scrollable-content::-webkit-scrollbar-thumb:hover {
+    background: var(--color-scrollbar-thumb-hover); /* USE VAR */
+}
+
+/* * Modal and Overlay Styles
+  * These styles define the appearance and positioning of modal dialogs.
+  */
+.message-box {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: white;
+    padding: 2rem;
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    z-index: 1000;
+    text-align: center;
+    min-width: 300px;
+    max-width: 90%;
+    width: auto;
+}
+
+.message-box-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 999;
+}
+
+/* * Table Specific Styles (Customer List, Users, Product Settings, Activity Log)
+  * General styling for all data tables to ensure consistency and responsiveness.
+  */
+.customer-table-container, 
+.users-table-container,
+.activity-log-table-container {
+    overflow-x: auto;
+    width: 100%;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+    cursor: grab;
+}
+
+.customer-table-container.active-drag,
+.activity-log-table-container.active-drag {
+    cursor: grabbing;
+}
+
+.customer-table, 
+.users-table,
+#activityLogTable {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+}
+
+.customer-table th, .customer-table td, 
+.users-table th, .users-table td,
+#activityLogTable th, #activityLogTable td {
+    padding: 0.6rem 0.8rem;
+    text-align: left;
+    border: 1px solid var(--color-border-light); /* USE VAR */
+    white-space: normal;
+    word-wrap: break-word;
+    vertical-align: top;
+    min-width: 100px;
+    max-width: 350px;
+}
+
+.customer-table th, 
+.users-table th,
+#activityLogTable th {
+    white-space: nowrap;
+    background-color: var(--color-scrollbar-track); /* USE VAR */
+    font-weight: 600;
+    color: var(--color-text-header); /* USE VAR */
+    text-transform: uppercase;
+}
+
+/* NEW: Styling for sortable table headers (applies to customer table) */
+.customer-table th.sortable {
+    cursor: pointer;
+    position: relative;
+    padding-right: 20px;
+}
+
+.customer-table th.sortable::after {
+    content: '\f0dc';
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    position: absolute;
+    right: 5px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--color-scrollbar-thumb); /* USE VAR */
+    font-size: 0.75rem;
+    transition: color 0.2s ease-in-out, transform 0.2s ease-in-out;
+}
+
+.customer-table th.sortable.asc::after {
+    content: '\f0de';
+    color: var(--color-primary); /* USE VAR */
+}
+
+.customer-table th.sortable.desc::after {
+    content: '\f0dd';
+    color: var(--color-primary); /* USE VAR */
+}
+
+.customer-table tbody tr:hover, 
+.users-table tbody tr:hover,
+#activityLogTable tbody tr:hover {
+    background-color: var(--color-row-hover); /* USE VAR */
+}
+
+/* Specific column hiding for cleaner data presentation */
+.customer-table th.id-column,
+.customer-table td.id-column,
+.customer-table th.date-recorded-column,
+.customer-table td.date-recorded-column {
+    display: none;
+}
+
+/* Styles for in-table editable elements (inputs, textareas, selects) */
+.customer-table input, 
+.customer-table textarea, 
+.customer-table select {
+    width: 100%;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--color-border-medium); /* USE VAR */
+    border-radius: 0.25rem;
+    box-sizing: border-box;
+    font-size: 0.8rem;
+}
+
+/* Styles for buttons specifically used within table edit mode */
+.customer-table .in-table-edit-btn {
+    width: auto;
+    text-align: center;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.75rem;
+    white-space: nowrap;
+    border-radius: 0.375rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease-in-out;
+}
+
+/* Style for the wrapper div inside the action td */
+.customer-actions-buttons-wrapper {
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    height: 100%;
+    padding: 0 4px;
+    box-sizing: border-box;
+}
+
+.customer-actions-buttons-wrapper button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    min-width: 65px;
+    height: 32px;
+    padding: 0.5rem;
+    font-size: 0.75rem;
+    white-space: nowrap;
+    border-radius: 0.375rem;
+    transition: all 0.2s ease-in-out;
+}
+
+/* CSS for expanding cell on click */
+.customer-table td.expanded {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    position: static;
+    background-color: #e6e6e6; /* This can stay as a unique color or become a variable */
+    z-index: 10;
+    box-shadow: 0 0 5px rgba(0,0,0,0.2);
+}
+.customer-table td.expanded .tooltip-text {
+    visibility: hidden;
+}
+
+/* --- FIX V2: การปรับความกว้างคอลัมน์ในตารางข้อมูลลูกค้า (ใช้ min-width) --- */
+
+/* --- กลุ่มคอลัมน์ที่ต้องการให้กว้างขึ้น --- */
+.customer-table .companyName-column {
+    min-width: 220px; /* ชื่อบริษัท */
+}
+.customer-table .address-column {
+    min-width: 280px; /* ที่อยู่ */
+}
+.customer-table .usedProduct-column {
+    min-width: 250px; /* สินค้าที่ใช้ */
+}
+.customer-table .comment-column {
+    min-width: 280px; /* คอมเม้น */
+}
+
+/* --- กลุ่มคอลัมน์ข้อมูลผู้ติดต่อ --- */
+.customer-table .contact1Name-column,
+.customer-table .contact2Name-column,
+.customer-table .contact3Name-column {
+    min-width: 160px;
+}
+.customer-table .contact1Email-column,
+.customer-table .contact2Email-column,
+.customer-table .contact3Email-column {
+    min-width: 180px;
+}
+.customer-table .primaryEmail-column {
+    min-width: 180px;
+}
+
+/* --- กลุ่มคอลัมน์ที่ต้องการให้แคบลง แต่ยังคงอ่านหัวข้อได้ --- */
+.customer-table .status-column {
+    min-width: 110px; /* สถานะ */
+}
+.customer-table .dateCreated-column,
+.customer-table .lastModified-column {
+    min-width: 140px; /* วันที่ */
+}
+.customer-table .contactCount-column {
+    min-width: 80px; /* จำนวนการติดต่อ (ตัวเลข) */
+    text-align: center; /* จัดให้ตัวเลขอยู่ตรงกลาง */
+}
+
+/* --- จัดให้ Header ของคอลัมน์ตัวเลขอยู่ตรงกลางด้วย --- */
+.customer-table th.contactCount-column {
+    text-align: center;
+}
+
+/* * Tab Navigation Styles (for Reports and Settings)
+  * For primary tab-like components, e.g., in reports.
+  */
+.report-tab-button,
+.settings-tab-button {
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
+    font-weight: 500;
+    color: #6b7280;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s ease-in-out;
+}
+
+.report-tab-button:hover,
+.settings-tab-button:hover {
+    color: #4b5563;
+    border-color: var(--color-border-medium); /* USE VAR */
+}
+
+.report-tab-button.active,
+.settings-tab-button.active {
+    border-color: var(--color-primary); /* USE VAR */
+    color: #374151;
+    font-weight: 600;
+}
+
+/* * Custom Tooltip Styles
+  * For custom tooltips that appear on hover.
+  */
+.custom-tooltip {
+    position: absolute;
+    background-color: var(--color-tooltip-bg); /* USE VAR */
+    color: white;
+    padding: 6px 10px;
+    border-radius: 5px;
+    font-size: 13px;
+    white-space: nowrap;
+    z-index: 1001;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s ease-in-out;
+}
+
+/* * Specific Table Adjustments for Inactive Customers Report
+  * Overrides for the inactive customers table to make it more concise.
+  */
+#inactiveCustomersTable th,
+#inactiveCustomersTable td {
+    font-size: 0.75rem;
+    padding: 0.4rem 0.6rem;
+    vertical-align: middle;
+}
+
+#inactiveCustomersTable td:nth-child(1) { /* Company Name */
+    max-width: 180px;
+}
+#inactiveCustomersTable td:nth-child(2) { /* Status (สถานะ) */
+    width: 120px;
+    min-width: 110px;
+    white-space: nowrap;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#inactiveCustomersTable td:nth-child(3) { /* Last Contact */
+    max-width: 100px;
+}
+#inactiveCustomersTable td:nth-child(4) { /* Days Inactive (ไม่ได้ติดต่อนาน (วัน)) */
+    width: 60px;
+    min-width: 50px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* * Specific Adjustments for Login Modal
+  * Ensures proper centering and sizing for the login form.
+  */
+#loginModal #loginFormContainer {
+    background-color: white;
+    padding: 2.5rem;
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    width: 100%;
+    max-width: 400px;
+}
+
+/* * Unused/Deprecated Elements (for cleanup)
+  */
+#customerDetailModalOverlay, 
+#customerDetailModal {
+    display: none !important;
+}
+
+/* --- NEW UX Enhancements STYLES --- */
+
+/* Global Notification Container */
+.notification-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1050;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none;
+}
+
+.notification-toast {
+    background-color: white;
+    padding: 1rem 1.5rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    max-width: 350px;
+    opacity: 0;
+    transform: translateX(100%);
+    transition: opacity 0.3s ease-out, transform 0.3s ease-out;
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    border-left: 5px solid;
+}
+
+.notification-toast.show {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.notification-toast .icon {
+    margin-right: 0.75rem;
+    font-size: 1.5rem;
+}
+
+.notification-toast .title {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+.notification-toast .message {
+    font-size: 0.9rem;
+    color: #4b5563;
+}
+
+.notification-toast.success {
+    border-color: var(--color-success); /* USE VAR */
+}
+.notification-toast.success .icon {
+    color: var(--color-success); /* USE VAR */
+}
+.notification-toast.error {
+    border-color: var(--color-danger); /* USE VAR */
+}
+.notification-toast.error .icon {
+    color: var(--color-danger); /* USE VAR */
+}
+.notification-toast.info {
+    border-color: var(--color-info); /* USE VAR */
+}
+.notification-toast.info .icon {
+    color: var(--color-info); /* USE VAR */
+}
+.notification-toast.warning {
+    border-color: var(--color-warning); /* USE VAR */
+}
+.notification-toast.warning .icon {
+    color: var(--color-warning); /* USE VAR */
+}
+
+/* Loading Spinner Overlay */
+.loading-spinner-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(255, 255, 255, 0.8);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 900;
+    border-radius: 0.5rem;
+}
+
+.spinner {
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid var(--color-primary); /* USE VAR */
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    margin-bottom: 10px;
+}
+
+.loading-text {
+    color: var(--color-text-header); /* USE VAR */
+    font-size: 0.9rem;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Form Validation Styles */
+input.invalid,
+textarea.invalid,
+select.invalid {
+    border-color: var(--color-danger); /* USE VAR */
+    box-shadow: 0 0 0 1px var(--color-danger); /* USE VAR */
+}
+
+/* Activity Log Table Specific Styles */
+#activityLogTable th,
+#activityLogTable td {
+    font-size: 0.75rem;
+    padding: 0.4rem 0.6rem;
+    vertical-align: top;
+}
+
+#activityLogTable td:nth-child(1) { /* Timestamp */
+    max-width: 120px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#activityLogTable td:nth-child(2) { /* User Email */
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#activityLogTable td:nth-child(3) { /* Action Type */
+    max-width: 150px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#activityLogTable td:nth-child(4) { /* Details */
+    max-width: 400px;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+}
+#activityLogTable td:nth-child(5) { /* Status */
+    max-width: 60px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* --- NEW: Skeleton Loading Styles --- */
+.skeleton {
+    background-color: #e5e7eb; /* Corresponds to Tailwind's gray-200 */
+    border-radius: 0.25rem; /* rounded-sm */
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.spinner {
+    border: 8px solid #f3f3f3; /* Light grey */
+    border-top: 8px solid #3498db; /* Blue */
+    border-radius: 50%;
+    animation: spin 1.5s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+</style>
